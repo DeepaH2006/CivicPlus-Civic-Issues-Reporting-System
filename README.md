@@ -37,24 +37,25 @@ npm start
 
 ## 📸 Screenshots
 
+## 📸 Screenshots
 
 ### Citizen Dashboard
-![Citizen](citizen_dashboard.png)
+![Citizen](https://raw.githubusercontent.com/DeepaH2006/CivicPlus-Civic-Issues-Reporting-System/main/citizen_dashboard.png)
 
 ### Citizen Dashboard 2
-![Citizen2](citizendashboard2.png)
+![Citizen2](https://raw.githubusercontent.com/DeepaH2006/CivicPlus-Civic-Issues-Reporting-System/main/citizendashboard2.png)
 
 ### Admin Dashboard
-![Admin](Admindashboard.png)
+![Admin](https://raw.githubusercontent.com/DeepaH2006/CivicPlus-Civic-Issues-Reporting-System/main/Admindashboard.png)
 
 ### Admin Analytics
-![Analytics](Admin_dashboard_Analytics.png)
+![Analytics](https://raw.githubusercontent.com/DeepaH2006/CivicPlus-Civic-Issues-Reporting-System/main/Admin_dashboard_Analytics.png)
 
 ### Field Staff (Water Supply)
-![Water](Field_staff(watersupply).png)
+![Water](https://raw.githubusercontent.com/DeepaH2006/CivicPlus-Civic-Issues-Reporting-System/main/Field_staff(watersupply).png)
 
 ### Field Staff (Road Safety)
-![Road](Field_staff(RoadSafty).png)
+![Road](https://raw.githubusercontent.com/DeepaH2006/CivicPlus-Civic-Issues-Reporting-System/main/Field_staff(RoadSafty).png)
 
 ### Map View
-![Map](Mapview2.png)
+![Map](https://raw.githubusercontent.com/DeepaH2006/CivicPlus-Civic-Issues-Reporting-System/main/Mapview2.png)
