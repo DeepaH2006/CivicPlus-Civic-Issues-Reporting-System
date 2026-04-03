@@ -37,22 +37,28 @@ npm start
 
 ## 📸 Screenshots
 
+## 📸 Screenshots
+
 ### Citizen Dashboard
-![Citizen](./citizen_dashboard.png)
+![Citizen](citizen_dashboard.png)
 
 ### Citizen Dashboard 2
-![Citizen2](./citizendashboard2.png)
+![Citizen2](citizendashboard2.png)
 
 ### Admin Dashboard
-![Admin](./Admindashboard.png)
+![Admin](Admindashboard.png)
 
 ### Admin Analytics
-![Analytics](./Admin_dashboard_Analytics.png)
+![Analytics](Admin_dashboard_Analytics.png)
 
 ### Field Staff (Water Supply)
-![Water](./Field_staff(watersupply).png)
+![Water](Field_staff(watersupply).png)
 
 ### Field Staff (Road Safety)
+![Road](Field_staff(RoadSafty).png)
+
+### Map View
+![Map](Mapview2.png)
 ![Road](./Field_staff(RoadSafty).png)
 
 ### Map View
