@@ -34,3 +34,26 @@ Civic Plus is a crowd-sourced civic issue reporting system that allows citizens 
 cd backend
 npm install
 npm start
+
+## 📸 Screenshots
+
+### Citizen Dashboard
+![Citizen](./citizen_dashboard.png)
+
+### Citizen Dashboard 2
+![Citizen2](./citizendashboard2.png)
+
+### Admin Dashboard
+![Admin](./Admindashboard.png)
+
+### Admin Analytics
+![Analytics](./Admin_dashboard_Analytics.png)
+
+### Field Staff (Water Supply)
+![Water](./Field_staff(watersupply).png)
+
+### Field Staff (Road Safety)
+![Road](./Field_staff(RoadSafty).png)
+
+### Map View
+![Map](./Mapview2.png)
