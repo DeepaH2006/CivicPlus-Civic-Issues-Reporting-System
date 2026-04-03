@@ -37,7 +37,6 @@ npm start
 
 ## 📸 Screenshots
 
-## 📸 Screenshots
 
 ### Citizen Dashboard
 ![Citizen](citizen_dashboard.png)
@@ -59,7 +58,3 @@ npm start
 
 ### Map View
 ![Map](Mapview2.png)
-![Road](./Field_staff(RoadSafty).png)
-
-### Map View
-![Map](./Mapview2.png)
