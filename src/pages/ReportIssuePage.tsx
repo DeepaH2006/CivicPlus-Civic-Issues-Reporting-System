@@ -147,9 +147,8 @@ export default function ReportIssuePage() {
   };
 
 const API_BASE =
-  window.location.hostname === "localhost"
-    ? "http://localhost:5000"
-    : `http://${window.location.hostname}:5000`;
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://localhost:5000";
 
 const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
