@@ -203,10 +203,10 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
 
     toast.success("Complaint submitted successfully!");
     navigate("/dashboard");
-  } catch (error: any) {
-    console.error("Submit error:", error);
-    toast.error("Server not reachable");
-  }
+  } } catch (error: any) {
+  console.error("Submit error:", error);
+  toast.error(error.message || "Complaint submission failed");
+}
 };
 <button
   type="button"
