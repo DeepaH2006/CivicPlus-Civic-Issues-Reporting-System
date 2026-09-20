@@ -67,8 +67,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const loggedInUser = data.user || data;
 
-      setUser(loggedInUser);
-      localStorage.setItem("civic_user", JSON.stringify(loggedInUser));
+const normalizedUser = {
+  ...loggedInUser,
+  id: loggedInUser.id || loggedInUser._id,
+};
+
+setUser(normalizedUser);
+localStorage.setItem("civic_user", JSON.stringify(normalizedUser));
 
       return { success: true };
     } catch (error) {
