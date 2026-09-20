@@ -28,9 +28,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const API_BASE =
-  window.location.hostname === "localhost"
-    ? "http://localhost:5000"
-    : `http://${window.location.hostname}:5000`;
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://localhost:5000";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
