@@ -16,10 +16,12 @@ export default function CitizenDashboard() {
   }, []);
 
   const myComplaints = complaints.filter(
-    (complaint: any) =>
-      complaint.userId === user?.id || complaint.userName === user?.name
-  );
-
+  (complaint: any) =>
+    complaint.userId === user?.id ||
+    complaint.userId === user?._id ||
+    complaint.userEmail === user?.email ||
+    complaint.userName === user?.name
+);
   const totalCount = myComplaints.length;
   const pendingCount = myComplaints.filter(
     (c: any) => c.status?.toLowerCase() === "pending"
