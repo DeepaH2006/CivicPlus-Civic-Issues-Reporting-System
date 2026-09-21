@@ -164,16 +164,21 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
       ? `[${otherCategory.trim()}] ${description.trim()}`
       : description.trim();
 
- const complaintData = {
-  userId: user?._id || user?.id,
-  userName: user?.name,
+const complaintData = {
+  userId: user?.id || user?._id || "",
+  userName: user?.name || "",
+  userEmail: user?.email || "",
+
   category,
   description: finalDescription,
+
   imageUrl:
     imagePreview ||
     "https://images.unsplash.com/photo-1530587191325-3db32d826c18?w=400",
+
   latitude: lat,
   longitude: long,
+
   priority,
   status: "Pending",
 };
