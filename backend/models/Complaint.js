@@ -11,6 +11,11 @@ const ComplaintSchema = new mongoose.Schema({
     default: "",
   },
 
+  userEmail: {
+    type: String,
+    default: "",
+  },
+
   category: {
     type: String,
     default: "",
