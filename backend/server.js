@@ -115,13 +115,25 @@ app.post("/complaint", async (req, res) => {
       status: req.body.status || "Pending",
     });
 
-    await complaint.save();
+   await complaint.save();
 
-    res.status(201).json({
-      success: true,
-      message: "Complaint submitted successfully",
-      complaint,
-    });
+console.log("✅ COMPLAINT SAVED TO MONGODB:");
+console.log({
+  id: complaint._id,
+  userId: complaint.userId,
+  userName: complaint.userName,
+  userEmail: complaint.userEmail,
+  category: complaint.category,
+  department: complaint.department,
+  assignedStaff: complaint.assignedStaff,
+  status: complaint.status,
+});
+
+res.status(201).json({
+  success: true,
+  message: "Complaint submitted successfully",
+  complaint,
+});
   } catch (err) {
     console.error("Complaint save error:", err);
     res.status(500).json({
