@@ -208,7 +208,7 @@ const complaintData = {
 
     toast.success("Complaint submitted successfully!");
     navigate("/dashboard");
-  } } catch (error: any) {
+  } catch (error: any) {
   console.error("Submit error:", error);
   toast.error(error.message || "Complaint submission failed");
 }
