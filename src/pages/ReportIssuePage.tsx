@@ -217,7 +217,7 @@ const complaintData = {
   type="button"
   onClick={async () => {
     try {
-      const res = await fetch("http://localhost:5000/");
+      const res = await fetch(`${API_BASE}/`);
       const text = await res.text();
       console.log("Backend test:", text);
       alert(text);
@@ -229,68 +229,7 @@ const complaintData = {
 >
   Test Backend
 </button>
-/*
-const getLocation = () => {
-  if (!navigator.geolocation) {
-    toast.error("Geolocation is not supported by this browser");
-    return;
-  }
 
-  toast.loading("Fetching your location...", { id: "location" });
-
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const latitude = pos.coords.latitude;
-      const longitude = pos.coords.longitude;
-      const accuracy = pos.coords.accuracy;
-
-      console.log("Latitude:", latitude);
-      console.log("Longitude:", longitude);
-      console.log("Accuracy in meters:", accuracy);
-
-      setLat(latitude);
-      setLong(longitude);
-
-      if (accuracy <= 50) {
-        toast.success(`Accurate location captured (${Math.round(accuracy)}m)`, {
-          id: "location",
-        });
-      } else {
-        toast.success(
-          `Location captured, but accuracy is low (${Math.round(accuracy)}m). Try moving outdoors or enabling GPS.`,
-          { id: "location" }
-        );
-      }
-    },
-    (err) => {
-      console.error("Geolocation error:", err);
-
-      let message = "Unable to fetch location";
-
-      switch (err.code) {
-        case err.PERMISSION_DENIED:
-          message = "Location permission denied. Please allow location access.";
-          break;
-        case err.POSITION_UNAVAILABLE:
-          message = "Location unavailable. Turn on GPS / device location.";
-          break;
-        case err.TIMEOUT:
-          message = "Location request timed out. Please try again.";
-          break;
-        default:
-          message = "Failed to get location.";
-      }
-
-      toast.error(message, { id: "location" });
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0,
-    }
-  );
-};
-*/
 const fetchLocation = (retry = false) => {
   navigator.geolocation.getCurrentPosition(
     (pos) => {
@@ -339,135 +278,6 @@ const getLocation = () => {
   toast.loading("Fetching current location...", { id: "location" });
   fetchLocation();
 };
-/*
-const getLocation = () => {
-  if (!navigator.geolocation) {
-    toast.error("Geolocation is not supported by this browser");
-    return;
-  }
-
-  toast.loading("Fetching current location...", { id: "location" });
-
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const latitude = pos.coords.latitude;
-      const longitude = pos.coords.longitude;
-      const accuracy = pos.coords.accuracy;
-
-      console.log("Latitude:", latitude);
-      console.log("Longitude:", longitude);
-      console.log("Accuracy:", accuracy);
-
-      // Reject very poor accuracy
-      if (accuracy > 100) {
-        toast.error(
-          `Location is too inaccurate (${Math.round(
-            accuracy
-          )}m). Please move outdoors and try again.`,
-          { id: "location" }
-        );
-        return;
-      }
-
-      setLat(latitude);
-      setLong(longitude);
-
-      toast.success(
-        `Location captured successfully (${Math.round(accuracy)}m accuracy)`,
-        { id: "location" }
-      );
-    },
-    (err) => {
-      console.error("Geolocation error:", err);
-
-      let message = "Unable to fetch location";
-      if (err.code === 1) {
-        message = "Location permission denied. Please allow location access.";
-      } else if (err.code === 2) {
-        message = "Location unavailable. Please turn on GPS or device location.";
-      } else if (err.code === 3) {
-        message = "Location request timed out. Please try again.";
-      }
-
-      toast.error(message, { id: "location" });
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 20000,
-      maximumAge: 0,
-    }
-  );
-};*/
-/*const getLocation = () => {
-  if (!navigator.geolocation) {
-    toast.error("Geolocation is not supported by this browser");
-    return;
-  }
-
-  toast.loading("Getting accurate location...", { id: "location" });
-
-  const watchId = navigator.geolocation.watchPosition(
-    (pos) => {
-      const latitude = pos.coords.latitude;
-      const longitude = pos.coords.longitude;
-      const accuracy = pos.coords.accuracy;
-
-      console.log("Latitude:", latitude);
-      console.log("Longitude:", longitude);
-      console.log("Accuracy:", accuracy);
-
-      setLat(latitude);
-      setLong(longitude);
-
-      if (accuracy <= 30) {
-        toast.success(`Accurate location captured (${Math.round(accuracy)}m)`, {
-          id: "location",
-        });
-        navigator.geolocation.clearWatch(watchId);
-      }
-    },
-    (err) => {
-      console.error("Geolocation error:", err);
-      toast.error("Unable to get location. Check permission and GPS.", {
-        id: "location",
-      });
-      navigator.geolocation.clearWatch(watchId);
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 20000,
-      maximumAge: 0,
-    }
-  );
-
-  setTimeout(() => {
-    navigator.geolocation.clearWatch(watchId);
-  }, 20000);
-};*/
-/*
-  const getLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error("Geolocation not supported in this browser");
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLat(pos.coords.latitude);
-        setLong(pos.coords.longitude);
-        toast.success("Accurate location captured");
-      },
-      (err) => {
-        console.error(err);
-        toast.error("Unable to get accurate location. Please allow permission.");
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      }
-    );
-  };*/
 
   const toggleVoice = () => {
     const SpeechRecognition =
