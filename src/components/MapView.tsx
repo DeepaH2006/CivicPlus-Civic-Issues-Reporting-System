@@ -1,5 +1,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Complaint } from "@/data/store";
@@ -140,6 +141,52 @@ function createPopup(c: ComplaintWithCoordinates, index: number) {
   return root;
 }
 
+async function geocodeAddress(address: string) {
+  const url = new URL(
+    "https://nominatim.openstreetmap.org/search"
+  );
+
+  url.searchParams.set("q", address);
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("limit", "1");
+
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(
+      "Address search is temporarily unavailable. Please try again."
+    );
+  }
+
+  const results = await response.json();
+
+  if (!Array.isArray(results) || results.length === 0) {
+    throw new Error(
+      "Address not found. Try including the street, area, city, or nearby landmark."
+    );
+  }
+
+  const latitude = Number(results[0].lat);
+  const longitude = Number(results[0].lon);
+
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    throw new Error("The address search returned invalid coordinates.");
+  }
+
+  return {
+    latitude,
+    longitude,
+    address: results[0].display_name || address,
+  };
+}
+
 export default function MapView({
   complaints,
   height = "400px",
@@ -155,6 +202,7 @@ export default function MapView({
   const gpsWatchRef = useRef<number | null>(null);
   const gpsTimerRef = useRef<number | null>(null);
   const bestPositionRef = useRef<GeolocationPosition | null>(null);
+  const manualAddressRef = useRef("");
 
   const [locating, setLocating] = useState(false);
   const [locationMessage, setLocationMessage] = useState("");
@@ -204,7 +252,30 @@ export default function MapView({
     onLocationSelect?.(location);
   }
 
-  // Initialize Leaflet.
+  function setSelectedMarker(
+    latitude: number,
+    longitude: number,
+    popupText: string
+  ) {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const point: L.LatLngExpression = [latitude, longitude];
+
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setLatLng(point);
+    } else {
+      userMarkerRef.current = L.marker(point).addTo(map);
+    }
+
+    const popup = document.createElement("div");
+    popup.textContent = popupText;
+
+    userMarkerRef.current.bindPopup(popup).openPopup();
+    map.setView(point, 17);
+  }
+
+  // Initialize the map once.
   useEffect(() => {
     const container = mapContainerRef.current;
 
@@ -229,7 +300,6 @@ export default function MapView({
     mapRef.current = map;
     markersLayerRef.current = layer;
 
-    // Let citizens select an approximate location directly on the map.
     map.on("click", (event: L.LeafletMouseEvent) => {
       const { lat, lng } = event.latlng;
 
@@ -239,17 +309,15 @@ export default function MapView({
         userMarkerRef.current = L.marker([lat, lng]).addTo(map);
       }
 
-      userMarkerRef.current.bindPopup(
-        "Selected issue location"
-      ).openPopup();
+      userMarkerRef.current
+        .bindPopup("Selected issue location")
+        .openPopup();
 
       setGpsAccuracy(null);
-      setLocationMessage(
-        "Map location selected. Confirm the address in the field below."
-      );
+      setLocationMessage("Map location selected.");
 
       publishLocation({
-        address: manualAddress.trim(),
+        address: manualAddressRef.current.trim(),
         latitude: lat,
         longitude: lng,
         source: "map",
@@ -277,7 +345,6 @@ export default function MapView({
       markersLayerRef.current = null;
       userMarkerRef.current = null;
     };
-    // Map initialization is intentionally performed once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -317,7 +384,6 @@ export default function MapView({
         .addTo(layer);
     });
 
-    // Do not move away from a location the user has already selected.
     if (selectedLocation) return;
 
     if (validComplaints.length === 0) {
@@ -343,7 +409,7 @@ export default function MapView({
     selectedLocation,
   ]);
 
-  // Request repeated high-accuracy GPS readings for up to 60 seconds.
+  // GPS location detection.
   function detectMyLocation() {
     const map = mapRef.current;
 
@@ -361,7 +427,7 @@ export default function MapView({
 
     if (!window.isSecureContext) {
       setLocationMessage(
-        "GPS requires HTTPS. Open the secure deployed website or enter your address manually."
+        "GPS requires HTTPS. Open the secure website or enter your address manually."
       );
       return;
     }
@@ -370,14 +436,13 @@ export default function MapView({
     bestPositionRef.current = null;
     setLocating(true);
     setGpsAccuracy(null);
-    setLocationMessage(
-      "Searching for an accurate location. Keep the page open..."
-    );
+    setLocationMessage("Searching for an accurate GPS location...");
 
     let finished = false;
 
     const finishWithBestReading = () => {
       if (finished) return;
+
       finished = true;
       stopGpsWatch();
       setLocating(false);
@@ -391,26 +456,19 @@ export default function MapView({
 
         setLocationMessage(
           accuracy !== null
-            ? `GPS accuracy is about ${accuracy} m. This reading was not accepted as precise. Enter the address manually or select a point on the map.`
-            : "Could not obtain your location. Enter the address manually or select a point on the map."
+            ? `GPS accuracy is approximately ${accuracy} m. Enter your address manually or select a point on the map.`
+            : "Could not obtain your location. Enter your address manually or select a point on the map."
         );
         return;
       }
 
       const { latitude, longitude, accuracy } = best.coords;
-      const point: L.LatLngExpression = [latitude, longitude];
 
-      if (userMarkerRef.current) {
-        userMarkerRef.current.setLatLng(point);
-      } else {
-        userMarkerRef.current = L.marker(point).addTo(map);
-      }
-
-      userMarkerRef.current
-        .bindPopup(`GPS location<br>Accuracy: ${Math.round(accuracy)} m`)
-        .openPopup();
-
-      map.setView(point, 17);
+      setSelectedMarker(
+        latitude,
+        longitude,
+        `GPS location — accuracy approximately ${Math.round(accuracy)} m`
+      );
 
       publishLocation({
         address: "",
@@ -422,7 +480,7 @@ export default function MapView({
 
       setGpsAccuracy(accuracy);
       setLocationMessage(
-        `GPS location selected with approximately ${Math.round(accuracy)} m accuracy.`
+        `GPS location selected. Accuracy: approximately ${Math.round(accuracy)} m.`
       );
     };
 
@@ -445,7 +503,7 @@ export default function MapView({
           setLocationMessage(
             `Best GPS accuracy so far: ${Math.round(
               bestPositionRef.current.coords.accuracy
-            )} m. You can enter an address manually if it does not improve.`
+            )} m. You can enter your address manually.`
           );
         }
       },
@@ -458,10 +516,10 @@ export default function MapView({
 
         setLocationMessage(
           error.code === 1
-            ? "Location permission denied. Allow browser location access, or enter the address manually."
+            ? "Location permission denied. Allow browser location access or enter the address manually."
             : error.code === 3
-            ? "GPS request timed out. Try outdoors or enter the address manually."
-            : "Location is unavailable. Enable phone GPS or enter the address manually."
+            ? "GPS request timed out. Try again or enter the address manually."
+            : "Location is unavailable. Enable device location or enter the address manually."
         );
       },
       {
@@ -478,7 +536,10 @@ export default function MapView({
     }, 60000);
   }
 
-  function useManualAddress(event: React.FormEvent<HTMLFormElement>) {
+  // Search for a typed address and place its marker on the map.
+  async function useManualAddress(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
 
     const address = manualAddress.trim();
@@ -488,22 +549,43 @@ export default function MapView({
       return;
     }
 
+    if (!mapRef.current) {
+      setLocationMessage("Map is loading. Please try again.");
+      return;
+    }
+
     stopGpsWatch();
-    setLocating(false);
+    setLocating(true);
     setGpsAccuracy(null);
+    setLocationMessage("Searching for your address...");
 
-    // A manually typed address does not automatically provide coordinates.
-    publishLocation({
-      address,
-      latitude: null,
-      longitude: null,
-      source: "manual",
-      accuracy: null,
-    });
+    try {
+      const result = await geocodeAddress(address);
 
-    setLocationMessage(
-      "Manual address selected. Confirm the address before submitting the complaint."
-    );
+      setSelectedMarker(
+        result.latitude,
+        result.longitude,
+        result.address
+      );
+
+      publishLocation({
+        address: result.address,
+        latitude: result.latitude,
+        longitude: result.longitude,
+        source: "manual",
+        accuracy: null,
+      });
+
+      setLocationMessage("Address found and selected on the map.");
+    } catch (error) {
+      setLocationMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to find this address. Please try again."
+      );
+    } finally {
+      setLocating(false);
+    }
   }
 
   return (
@@ -520,12 +602,16 @@ export default function MapView({
             disabled={locating}
             className="rounded-lg px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60"
           >
-            {locating ? "Detecting GPS..." : "Use My Location"}
+            {locating ? "Searching..." : "Use My Location"}
           </button>
         </div>
 
         {locationMessage && (
-          <p role="status" aria-live="polite" className="mt-3 text-sm text-gray-700">
+          <p
+            role="status"
+            aria-live="polite"
+            className="mt-3 text-sm text-gray-700"
+          >
             {locationMessage}
           </p>
         )}
@@ -548,8 +634,7 @@ export default function MapView({
           </label>
 
           <p className="text-xs text-gray-600 mb-3">
-            If GPS is inaccurate or unavailable, enter the street,
-            area, nearby landmark, or full address.
+            Enter a street, area, city, or nearby landmark if GPS is unavailable.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-2">
@@ -557,7 +642,10 @@ export default function MapView({
               id="manual-location"
               type="text"
               value={manualAddress}
-              onChange={(event) => setManualAddress(event.target.value)}
+              onChange={(event) => {
+                setManualAddress(event.target.value);
+                manualAddressRef.current = event.target.value;
+              }}
               placeholder="Street, area, landmark, or address"
               maxLength={300}
               required
@@ -566,9 +654,10 @@ export default function MapView({
 
             <button
               type="submit"
-              className="rounded-lg px-4 py-2 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900"
+              disabled={locating}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 disabled:opacity-60"
             >
-              Use This Address
+              {locating ? "Searching Address..." : "Use This Address"}
             </button>
           </div>
         </form>
@@ -576,6 +665,7 @@ export default function MapView({
         {selectedLocation && (
           <div className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">
             <p className="font-semibold">Selected location</p>
+
             <p className="mt-1">
               Source:{" "}
               {selectedLocation.source === "gps"
@@ -602,9 +692,8 @@ export default function MapView({
         )}
 
         <p className="mt-3 text-xs text-gray-500">
-          You can also click directly on the map to select the issue location.
-          Map selections provide coordinates, but do not automatically identify
-          the street address.
+          You can also click the map to select a location. Map clicks provide
+          coordinates but do not automatically identify the street address.
         </p>
 
         <div className="flex flex-wrap gap-4 mt-3 text-sm">
