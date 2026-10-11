@@ -1,4 +1,5 @@
-import { useState, useRef } from "react";
+
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useComplaints } from "@/contexts/ComplaintContext";
@@ -50,13 +51,36 @@ export default function ReportIssuePage() {
   const [imagePreview, setImagePreview] = useState("");
   const [lat, setLat] = useState(13.0827);
   const [long, setLong] = useState(80.2707);
+
   const [isRecording, setIsRecording] = useState(false);
   const [lang, setLang] = useState("en-IN");
+  const [speechError, setSpeechError] = useState("");
+
   const recognitionRef = useRef<any>(null);
+  const speechBaseTextRef = useRef("");
+  const finalTranscriptRef = useRef("");
 
   const [isClassifying, setIsClassifying] = useState(false);
-  const [aiPrediction, setAiPrediction] = useState<AIPrediction | null>(null);
+  const [aiPrediction, setAiPrediction] =
+    useState<AIPrediction | null>(null);
   const [showMismatchDialog, setShowMismatchDialog] = useState(false);
+
+  const API_BASE =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+
+  // Stop speech recognition if the component is removed.
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.abort();
+        recognitionRef.current = null;
+      }
+    };
+  }, []);
 
   const classifyImage = async (file: File) => {
     setIsClassifying(true);
@@ -113,7 +137,10 @@ export default function ReportIssuePage() {
 
       setAiPrediction(prediction);
 
-      if (prediction.confidence >= 0.7 && prediction.category !== category) {
+      if (
+        prediction.confidence >= 0.7 &&
+        prediction.category !== category
+      ) {
         setShowMismatchDialog(true);
         toast.warning(
           `Possible mismatch: selected "${category}", detected "${prediction.category}"`
@@ -133,188 +160,150 @@ export default function ReportIssuePage() {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
+
     reader.onload = () => {
       setImagePreview(reader.result as string);
     };
-    reader.readAsDataURL(file);
 
+    reader.readAsDataURL(file);
     classifyImage(file);
   };
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:5000";
+  // Combine existing description, confirmed speech, and live speech.
+  const updateDescriptionFromSpeech = (interimText = "") => {
+    const parts = [
+      speechBaseTextRef.current.trim(),
+      finalTranscriptRef.current.trim(),
+      interimText.trim(),
+    ].filter(Boolean);
 
-const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-  e.preventDefault();
-
-  if (!user) {
-    toast.error("Please login first to submit a complaint");
-    navigate("/login");
-    return;
-  }
-
-  const finalDescription =
-    category === "Others"
-      ? `[${otherCategory.trim()}] ${description.trim()}`
-      : description.trim();
-
-const complaintData = {
-  userId: user?.id || user?._id || "",
-  userName: user?.name || "",
-  userEmail: user?.email || "",
-
-  category,
-  description: finalDescription,
-
-  imageUrl:
-    imagePreview ||
-    "https://images.unsplash.com/photo-1530587191325-3db32d826c18?w=400",
-
-  latitude: lat,
-  longitude: long,
-
-  priority,
-  status: "Pending",
-};
-
-  console.log("Submitting to:", `${API_BASE}/complaint`);
-  console.log("Payload:", complaintData);
-
-  try {
-    const response = await fetch(`${API_BASE}/complaint`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(complaintData),
-    });
-
-    const data = await response.json();
-    console.log("Response:", data);
-
-    if (!response.ok) {
-      throw new Error(data.message || "Submission failed");
-    }
-
-    if (data?.complaint) {
-      addComplaint(data.complaint);
-    }
-
-    toast.success("Complaint submitted successfully!");
-    navigate("/dashboard");
-  } catch (error: any) {
-  console.error("Submit error:", error);
-  toast.error(error.message || "Complaint submission failed");
-}
-};
-<button
-  type="button"
-  onClick={async () => {
-    try {
-      const res = await fetch(`${API_BASE}/`);
-      const text = await res.text();
-      console.log("Backend test:", text);
-      alert(text);
-    } catch (err) {
-      console.error("Backend test failed:", err);
-      alert("Cannot reach backend");
-    }
-  }}
->
-  Test Backend
-</button>
-
-const fetchLocation = (retry = false) => {
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const latitude = pos.coords.latitude;
-      const longitude = pos.coords.longitude;
-      const accuracy = pos.coords.accuracy;
-
-      if (accuracy > 100 && !retry) {
-        toast.loading("Low accuracy detected, retrying...", { id: "location" });
-        fetchLocation(true);
-        return;
-      }
-
-      if (accuracy > 100) {
-        toast.error(
-          `Still getting poor accuracy (${Math.round(accuracy)}m). Try using mobile GPS.`,
-          { id: "location" }
-        );
-        return;
-      }
-
-      setLat(latitude);
-      setLong(longitude);
-      toast.success(
-        `Location captured successfully (${Math.round(accuracy)}m accuracy)`,
-        { id: "location" }
-      );
-    },
-    (err) => {
-      toast.error("Unable to fetch location", { id: "location" });
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 20000,
-      maximumAge: 0,
-    }
-  );
-};
-
-const getLocation = () => {
-  if (!navigator.geolocation) {
-    toast.error("Geolocation not supported");
-    return;
-  }
-
-  toast.loading("Fetching current location...", { id: "location" });
-  fetchLocation();
-};
+    setDescription(parts.join(" "));
+  };
 
   const toggleVoice = () => {
-    const SpeechRecognition =
+    // Stop an active recording.
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+
+    const SpeechRecognitionAPI =
       (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition ||
-      null;
+      (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognition) {
-      toast.error("Speech recognition not supported in this browser");
+    if (!SpeechRecognitionAPI) {
+      setSpeechError(
+        "Speech recognition is unavailable. Try the latest version of Microsoft Edge."
+      );
+      toast.error("Speech recognition is not supported in this browser");
       return;
     }
 
-    if (isRecording) {
-      recognitionRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
+    setSpeechError("");
 
-    const recognition = new SpeechRecognition();
+    // Preserve any text already typed into the description.
+    speechBaseTextRef.current = description.trim();
+    finalTranscriptRef.current = "";
+
+    const recognition = new SpeechRecognitionAPI();
+
     recognition.lang = lang;
-    recognition.interimResults = false;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+      setSpeechError("");
+    };
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setDescription((prev) => (prev ? prev + " " + transcript : transcript));
+      let interimText = "";
+
+      // Process only results that have changed.
+      for (
+        let i = event.resultIndex;
+        i < event.results.length;
+        i++
+      ) {
+        const result = event.results[i];
+        const transcript = result[0]?.transcript?.trim();
+
+        if (!transcript) continue;
+
+        if (result.isFinal) {
+          finalTranscriptRef.current = [
+            finalTranscriptRef.current,
+            transcript,
+          ]
+            .filter(Boolean)
+            .join(" ");
+        } else {
+          interimText += `${transcript} `;
+        }
+      }
+
+      // Show live words and retain confirmed phrases.
+      updateDescriptionFromSpeech(interimText);
     };
 
-    recognition.onerror = () => {
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+
+      let message = "Voice input failed. Please try again.";
+
+      if (event.error === "not-allowed") {
+        message =
+          "Microphone access is blocked. Allow microphone access in Edge settings.";
+      } else if (event.error === "no-speech") {
+        message =
+          "No speech detected. Speak clearly and try again.";
+      } else if (event.error === "network") {
+        message =
+          "Speech recognition network error. Check your internet connection and try again.";
+      } else if (event.error === "audio-capture") {
+        message =
+          "No microphone was detected. Check your microphone connection.";
+      } else if (event.error === "language-not-supported") {
+        message =
+          "This recognition language is unavailable. Try English (India).";
+      } else if (event.error === "aborted") {
+        // A deliberate stop or abort is not necessarily a failure.
+        return;
+      }
+
+      setSpeechError(message);
+      toast.error(message);
+    };
+
+    recognition.onend = () => {
+      // Remove temporary words that were never confirmed.
+      updateDescriptionFromSpeech();
       setIsRecording(false);
-      toast.error("Voice input failed");
+      recognitionRef.current = null;
     };
-
-    recognition.onend = () => setIsRecording(false);
 
     recognitionRef.current = recognition;
-    recognition.start();
-    setIsRecording(true);
+
+    try {
+      recognition.start();
+    } catch (error) {
+      console.error("Unable to start speech recognition:", error);
+      recognitionRef.current = null;
+      setIsRecording(false);
+
+      const message =
+        "Could not start the microphone. Please try again.";
+      setSpeechError(message);
+      toast.error(message);
+    }
   };
 
   const handleAcceptSuggestion = () => {
@@ -322,12 +311,73 @@ const getLocation = () => {
       setCategory(aiPrediction.category);
       toast.success(`Category changed to "${aiPrediction.category}"`);
     }
+
     setShowMismatchDialog(false);
   };
 
   const handleKeepSelection = () => {
     toast.info("Keeping your original category selection.");
     setShowMismatchDialog(false);
+  };
+
+  const fetchLocation = (retry = false) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const latitude = pos.coords.latitude;
+        const longitude = pos.coords.longitude;
+        const accuracy = pos.coords.accuracy;
+
+        if (accuracy > 100 && !retry) {
+          toast.loading("Low accuracy detected, retrying...", {
+            id: "location",
+          });
+          fetchLocation(true);
+          return;
+        }
+
+        if (accuracy > 100) {
+          toast.error(
+            `Still getting poor accuracy (${Math.round(
+              accuracy
+            )}m). Try using mobile GPS.`,
+            { id: "location" }
+          );
+          return;
+        }
+
+        setLat(latitude);
+        setLong(longitude);
+
+        toast.success(
+          `Location captured successfully (${Math.round(
+            accuracy
+          )}m accuracy)`,
+          { id: "location" }
+        );
+      },
+      () => {
+        toast.error("Unable to fetch location", {
+          id: "location",
+        });
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+      }
+    );
+  };
+
+  const getLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error("Geolocation not supported");
+      return;
+    }
+
+    toast.loading("Fetching current location...", {
+      id: "location",
+    });
+    fetchLocation();
   };
 
   const previewComplaint = [
@@ -347,6 +397,80 @@ const getLocation = () => {
       history: [],
     },
   ];
+
+  const handleSubmit = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
+    e.preventDefault();
+
+    // Stop recognition before submitting the complaint.
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+
+    if (!user) {
+      toast.error("Please login first to submit a complaint");
+      navigate("/login");
+      return;
+    }
+
+    const finalDescription =
+      category === "Others"
+        ? `[${otherCategory.trim()}] ${description.trim()}`
+        : description.trim();
+
+    if (!description.trim()) {
+      toast.error("Please enter a description of the issue");
+      return;
+    }
+
+    const complaintData = {
+      userId: user?.id || user?._id || "",
+      userName: user?.name || "",
+      userEmail: user?.email || "",
+      category,
+      description: finalDescription,
+      imageUrl:
+        imagePreview ||
+        "https://images.unsplash.com/photo-1530587191325-3db32d826c18?w=400",
+      latitude: lat,
+      longitude: long,
+      priority,
+      status: "Pending",
+    };
+
+    console.log("Submitting to:", `${API_BASE}/complaint`);
+    console.log("Payload:", complaintData);
+
+    try {
+      const response = await fetch(`${API_BASE}/complaint`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(complaintData),
+      });
+
+      const data = await response.json();
+      console.log("Response:", data);
+
+      if (!response.ok) {
+        throw new Error(data.message || "Submission failed");
+      }
+
+      if (data?.complaint) {
+        addComplaint(data.complaint);
+      }
+
+      toast.success("Complaint submitted successfully!");
+      navigate("/dashboard");
+    } catch (error: any) {
+      console.error("Submit error:", error);
+      toast.error(
+        error.message || "Complaint submission failed"
+      );
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -399,15 +523,15 @@ const getLocation = () => {
               <div className="mt-3 flex items-center gap-2 rounded-lg bg-accent/50 px-3 py-2 text-xs">
                 <Brain className="h-4 w-4 text-primary" />
                 <span className="text-foreground">
-                  AI detected: <strong>{aiPrediction.category}</strong> (
-                  {Math.round(aiPrediction.confidence * 100)}% confidence)
+                  AI detected: <strong>{aiPrediction.category}</strong>{" "}
+                  ({Math.round(aiPrediction.confidence * 100)}% confidence)
                 </span>
               </div>
             )}
           </div>
 
           <div className="rounded-xl border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex items-center justify-between gap-3">
               <Label className="text-sm font-semibold text-foreground">
                 Description
               </Label>
@@ -416,15 +540,23 @@ const getLocation = () => {
                 <select
                   value={lang}
                   onChange={(e) => setLang(e.target.value)}
+                  disabled={isRecording}
                   className="rounded-md border-none bg-secondary px-2 py-1 text-xs text-foreground"
+                  aria-label="Speech recognition language"
                 >
-                  <option value="en-IN">English</option>
+                  <option value="en-IN">English (India)</option>
                   <option value="ta-IN">தமிழ்</option>
                 </select>
 
                 <button
                   type="button"
                   onClick={toggleVoice}
+                  aria-label={
+                    isRecording
+                      ? "Stop voice input"
+                      : "Start voice input"
+                  }
+                  aria-pressed={isRecording}
                   className={`rounded-full p-2 transition-colors ${
                     isRecording
                       ? "animate-pulse bg-destructive text-destructive-foreground"
@@ -442,17 +574,36 @@ const getLocation = () => {
 
             <Textarea
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe the issue in detail..."
+              onChange={(e) => {
+                setDescription(e.target.value);
+
+                // Keep the speech base synchronized if the user edits
+                // the description while not recording.
+                if (!recognitionRef.current) {
+                  speechBaseTextRef.current = e.target.value.trim();
+                  finalTranscriptRef.current = "";
+                }
+              }}
+              placeholder="Describe the issue in detail, or tap the microphone to speak..."
               rows={4}
               required
             />
 
             {isRecording && (
               <p className="mt-2 animate-pulse text-xs text-destructive">
-                🎤 Listening... Speak now
+                🎤 Listening... Speak clearly. Tap the microphone to stop.
               </p>
             )}
+
+            {speechError && (
+              <p role="alert" className="mt-2 text-xs text-destructive">
+                {speechError}
+              </p>
+            )}
+
+            <p className="mt-2 text-xs text-muted-foreground">
+              Check the recognized text and correct any mistakes before submitting.
+            </p>
           </div>
 
           <div className="rounded-xl border bg-card p-4">
@@ -488,6 +639,7 @@ const getLocation = () => {
               <input
                 type="file"
                 accept="image/*"
+                capture="environment"
                 className="hidden"
                 onChange={handleImageUpload}
               />
@@ -537,14 +689,21 @@ const getLocation = () => {
                 Location
               </Label>
 
-              <Button type="button" variant="outline" size="sm" onClick={getLocation}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={getLocation}
+              >
                 <MapPin className="mr-1 h-3 w-3" /> Get GPS
               </Button>
             </div>
 
             <div className="mb-3 grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs text-muted-foreground">Latitude</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Latitude
+                </Label>
                 <Input
                   type="number"
                   step="any"
@@ -554,7 +713,9 @@ const getLocation = () => {
               </div>
 
               <div>
-                <Label className="text-xs text-muted-foreground">Longitude</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Longitude
+                </Label>
                 <Input
                   type="number"
                   step="any"
@@ -572,7 +733,12 @@ const getLocation = () => {
             />
           </div>
 
-          <Button type="submit" className="w-full" size="lg" disabled={isClassifying}>
+          <Button
+            type="submit"
+            className="w-full"
+            size="lg"
+            disabled={isClassifying}
+          >
             {isClassifying ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
