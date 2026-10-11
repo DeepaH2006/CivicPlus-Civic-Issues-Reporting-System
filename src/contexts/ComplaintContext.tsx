@@ -41,25 +41,65 @@ export const ComplaintProvider = ({
     }
   };
 
-  // CREATE AND SAVE A COMPLAINT
+  // CREATE AND SAVE A COMPLAINT WITH A MANDATORY PHOTO
   const createComplaint = async (complaint: any) => {
     try {
-      const response = await fetch(`${API_BASE}/complaints`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...complaint,
-          address: complaint.address ?? "",
-          lat: complaint.lat ?? null,
-          long: complaint.long ?? null,
-          locationSource: complaint.locationSource ?? "manual",
-          locationAccuracy: complaint.locationAccuracy ?? null,
-        }),
+      // Validate mandatory fields
+      if (!complaint.description?.trim()) {
+        return {
+          success: false,
+          message: "Please enter a complaint description.",
+        };
+      }
+
+      if (
+        typeof complaint.photo === "undefined" ||
+        !(complaint.photo instanceof File)
+      ) {
+        return {
+          success: false,
+          message: "Please attach a photo of the civic issue.",
+        };
+      }
+
+      if (!complaint.photo.type.startsWith("image/")) {
+        return {
+          success: false,
+          message: "Please select a valid image file.",
+        };
+      }
+
+      // FormData allows the browser to upload the actual image file.
+      const formData = new FormData();
+
+      Object.entries({
+        ...complaint,
+        address: complaint.address ?? "",
+        latitude: complaint.latitude ?? "",
+        longitude: complaint.longitude ?? "",
+        locationSource: complaint.locationSource ?? "",
+        locationAccuracy: complaint.locationAccuracy ?? "",
+      }).forEach(([key, value]) => {
+        if (key === "photo" || value === undefined || value === null) {
+          return;
+        }
+
+        if (typeof value === "object") {
+          formData.append(key, JSON.stringify(value));
+        } else {
+          formData.append(key, String(value));
+        }
       });
 
-      const data = await response.json();
+      // The backend must use upload.single("photo").
+      formData.append("photo", complaint.photo);
+
+      const response = await fetch(`${API_BASE}/complaint`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         throw new Error(
@@ -69,14 +109,13 @@ export const ComplaintProvider = ({
 
       const savedComplaint = data.complaint ?? data;
 
-      if (savedComplaint && (savedComplaint._id || savedComplaint.id)) {
+      if (savedComplaint?._id || savedComplaint?.id) {
         setComplaints((prev) => {
           const id = savedComplaint._id ?? savedComplaint.id;
 
           if (
             prev.some(
-              (item) =>
-                (item._id ?? item.id) === id
+              (item) => (item._id ?? item.id) === id
             )
           ) {
             return prev;
@@ -85,14 +124,13 @@ export const ComplaintProvider = ({
           return [savedComplaint, ...prev];
         });
       } else {
-        // If the API uses a different success response format,
-        // reload the list to obtain the saved record.
         await fetchComplaints();
       }
 
       return {
         success: true,
         complaint: savedComplaint,
+        message: data.message || "Complaint submitted successfully.",
       };
     } catch (error) {
       console.error("Failed to create complaint:", error);
@@ -110,9 +148,11 @@ export const ComplaintProvider = ({
   // ADD AN ALREADY-SAVED COMPLAINT TO LOCAL STATE
   const addComplaint = (complaint: any) => {
     setComplaints((prev) => {
+      const id = complaint?._id ?? complaint?.id;
+
       if (
-        complaint?._id &&
-        prev.some((c) => c._id === complaint._id)
+        id &&
+        prev.some((item) => (item._id ?? item.id) === id)
       ) {
         return prev;
       }
@@ -207,8 +247,7 @@ export const ComplaintProvider = ({
   const getComplaintsByUser = (userId: string) =>
     complaints.filter(
       (complaint) =>
-        complaint.userId === userId ||
-        complaint.userId === String(userId)
+        String(complaint.userId) === String(userId)
     );
 
   const getComplaintsByDepartment = (department: string) =>
