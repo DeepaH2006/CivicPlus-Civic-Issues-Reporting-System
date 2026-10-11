@@ -1,3 +1,4 @@
+
 const mongoose = require("mongoose");
 
 const ComplaintSchema = new mongoose.Schema({
@@ -31,12 +32,33 @@ const ComplaintSchema = new mongoose.Schema({
     default: "",
   },
 
+  // Manually entered or GPS-derived address
+  address: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+
+  // GPS coordinates; null when unavailable
   latitude: {
     type: Number,
     default: null,
   },
 
   longitude: {
+    type: Number,
+    default: null,
+  },
+
+  // Indicates how the location was selected
+  locationSource: {
+    type: String,
+    enum: ["gps", "manual", "map", ""],
+    default: "",
+  },
+
+  // GPS accuracy in meters, if available
+  locationAccuracy: {
     type: Number,
     default: null,
   },
