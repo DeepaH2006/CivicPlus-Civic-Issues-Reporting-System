@@ -1,10 +1,10 @@
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Complaint } from "@/data/store";
 
-// Fix default Leaflet marker icons
+// Fix default Leaflet marker icons.
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 
 L.Icon.Default.mergeOptions({
@@ -46,7 +46,6 @@ function getCoordinate(
   min: number,
   max: number
 ): number | null {
-  // Do not convert missing or empty coordinates to zero.
   if (
     value === null ||
     value === undefined ||
@@ -68,7 +67,9 @@ function getCoordinate(
   return number;
 }
 
-function getLat(complaint: ComplaintWithCoordinates): number | null {
+function getLat(
+  complaint: ComplaintWithCoordinates
+): number | null {
   return getCoordinate(
     complaint.lat ?? complaint.latitude,
     -90,
@@ -76,7 +77,9 @@ function getLat(complaint: ComplaintWithCoordinates): number | null {
   );
 }
 
-function getLng(complaint: ComplaintWithCoordinates): number | null {
+function getLng(
+  complaint: ComplaintWithCoordinates
+): number | null {
   return getCoordinate(
     complaint.long ?? complaint.longitude,
     -180,
@@ -89,25 +92,21 @@ function createIcon(status: string) {
 
   return L.divIcon({
     className: "",
-    html: `
-      <div style="
-        width:28px;
-        height:28px;
-        border-radius:50%;
-        background:${color};
-        border:3px solid white;
-        box-shadow:0 2px 8px rgba(0,0,0,0.3);
-      "></div>
-    `,
+    html: `<div style="
+      width:28px;height:28px;border-radius:50%;
+      background:${color};border:3px solid white;
+      box-shadow:0 2px 8px rgba(0,0,0,0.3);
+    "></div>`,
     iconSize: [28, 28],
     iconAnchor: [14, 14],
     popupAnchor: [0, -14],
   });
 }
 
-function createPopup(complaint: ComplaintWithCoordinates, index: number) {
-  // Use textContent instead of inserting user-submitted content
-  // through innerHTML.
+function createPopup(
+  complaint: ComplaintWithCoordinates,
+  index: number
+) {
   const root = document.createElement("div");
   root.style.minWidth = "180px";
 
@@ -118,11 +117,10 @@ function createPopup(complaint: ComplaintWithCoordinates, index: number) {
 
   const description = document.createElement("p");
   description.className = "text-xs mt-1";
-  description.textContent = complaint.description
-    ? complaint.description.length > 80
-      ? `${complaint.description.slice(0, 80)}...`
-      : complaint.description
-    : "No description available";
+
+  const text = complaint.description || "No description available";
+  description.textContent =
+    text.length > 80 ? `${text.slice(0, 80)}...` : text;
 
   const details = document.createElement("div");
   details.className = "mt-2 flex gap-2 items-center flex-wrap";
@@ -163,8 +161,13 @@ export default function MapView({
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const userMarkerRef = useRef<L.Marker | null>(null);
+  const locationRequestId = useRef(0);
 
-  // Chennai is only the fallback map location, not the user's GPS.
+  const [locating, setLocating] = useState(false);
+  const [locationMessage, setLocationMessage] = useState("");
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+
   const defaultCenter = useMemo<[number, number]>(
     () => center ?? [13.0827, 80.2707],
     [center]
@@ -189,17 +192,17 @@ export default function MapView({
     (c) => c.status === "Resolved"
   ).length;
 
-  // Initialize the map only once.
+  // Initialize Leaflet once.
   useEffect(() => {
     const container = mapContainerRef.current;
 
     if (!container || mapRef.current) return;
 
-    const initialView = initialViewRef.current;
+    const initial = initialViewRef.current;
 
     const map = L.map(container, {
-      center: initialView.center,
-      zoom: initialView.zoom,
+      center: initial.center,
+      zoom: initial.zoom,
       scrollWheelZoom: true,
     });
 
@@ -212,10 +215,10 @@ export default function MapView({
       }
     ).addTo(map);
 
-    const markersLayer = L.layerGroup().addTo(map);
+    const layer = L.layerGroup().addTo(map);
 
     mapRef.current = map;
-    markersLayerRef.current = markersLayer;
+    markersLayerRef.current = layer;
 
     const resizeObserver = new ResizeObserver(() => {
       map.invalidateSize({ pan: false });
@@ -223,28 +226,29 @@ export default function MapView({
 
     resizeObserver.observe(container);
 
-    const resizeTimer = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       map.invalidateSize({ pan: false });
     }, 200);
 
     return () => {
-      window.clearTimeout(resizeTimer);
+      window.clearTimeout(timer);
       resizeObserver.disconnect();
       map.remove();
 
       mapRef.current = null;
       markersLayerRef.current = null;
+      userMarkerRef.current = null;
     };
   }, []);
 
-  // Render complaint markers using validated coordinates.
+  // Render complaint markers.
   useEffect(() => {
     const map = mapRef.current;
-    const markersLayer = markersLayerRef.current;
+    const layer = markersLayerRef.current;
 
-    if (!map || !markersLayer) return;
+    if (!map || !layer) return;
 
-    markersLayer.clearLayers();
+    layer.clearLayers();
 
     const validComplaints = (
       complaints as ComplaintWithCoordinates[]
@@ -264,14 +268,7 @@ export default function MapView({
         } => item.lat !== null && item.lng !== null
       );
 
-    // If no complaints have coordinates, show the fallback center.
-    if (validComplaints.length === 0) {
-      map.setView(defaultCenter, defaultZoom);
-      return;
-    }
-
     validComplaints.forEach(({ complaint, lat, lng }, index) => {
-      // Leaflet expects [latitude, longitude].
       const marker = L.marker([lat, lng], {
         icon: createIcon(complaint.status),
       });
@@ -282,44 +279,188 @@ export default function MapView({
         onMarkerClick?.(complaint as Complaint);
       });
 
-      marker.addTo(markersLayer);
+      marker.addTo(layer);
     });
 
-    if (validComplaints.length === 1) {
-      const { lat, lng } = validComplaints[0];
-
-      map.setView(
-        [lat, lng],
-        Math.max(defaultZoom, 15)
-      );
-    } else {
-      const bounds = L.latLngBounds(
-        validComplaints.map(
-          ({ lat, lng }) => [lat, lng] as [number, number]
-        )
-      );
-
-      map.fitBounds(bounds, {
-        padding: [40, 40],
-        maxZoom: 16,
-      });
+    if (validComplaints.length === 0) {
+      // Do not reset the map if the user has already located themselves.
+      if (!userMarkerRef.current) {
+        map.setView(defaultCenter, defaultZoom);
+      }
+      return;
     }
 
-    const resizeTimer = window.setTimeout(() => {
+    // Keep the complaint markers visible without overriding a user's
+    // current GPS view unnecessarily.
+    if (!userMarkerRef.current) {
+      if (validComplaints.length === 1) {
+        const item = validComplaints[0];
+        map.setView([item.lat, item.lng], Math.max(defaultZoom, 15));
+      } else {
+        const bounds = L.latLngBounds(
+          validComplaints.map(
+            ({ lat, lng }) => [lat, lng] as [number, number]
+          )
+        );
+
+        map.fitBounds(bounds, {
+          padding: [40, 40],
+          maxZoom: 16,
+        });
+      }
+    }
+
+    const timer = window.setTimeout(() => {
       map.invalidateSize({ pan: false });
     }, 200);
 
-    return () => {
-      window.clearTimeout(resizeTimer);
-    };
+    return () => window.clearTimeout(timer);
   }, [complaints, defaultCenter, defaultZoom, onMarkerClick]);
+
+  // Request a fresh high-accuracy browser location.
+  const detectMyLocation = () => {
+    const map = mapRef.current;
+
+    if (!map) {
+      setLocationMessage("The map is still loading. Please try again.");
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      setLocationMessage(
+        "Geolocation is not supported by this browser."
+      );
+      return;
+    }
+
+    if (!window.isSecureContext) {
+      setLocationMessage(
+        "GPS requires HTTPS. Open the deployed website using its HTTPS URL."
+      );
+      return;
+    }
+
+    const requestId = ++locationRequestId.current;
+
+    setLocating(true);
+    setLocationMessage("Requesting a fresh high-accuracy GPS location...");
+    setGpsAccuracy(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (requestId !== locationRequestId.current) return;
+
+        const { latitude, longitude, accuracy } = position.coords;
+
+        setLocating(false);
+        setGpsAccuracy(accuracy);
+
+        console.log("CivicPlus GPS result:", {
+          latitude,
+          longitude,
+          accuracyMeters: accuracy,
+        });
+
+        // Do not silently accept a very inaccurate location.
+        if (accuracy > 100) {
+          setLocationMessage(
+            `Location accuracy is about ${Math.round(accuracy)} m. ` +
+            "Move outdoors, enable phone GPS, and retry. This location has not been accepted as precise."
+          );
+          return;
+        }
+
+        const positionLatLng: L.LatLngExpression = [
+          latitude,
+          longitude,
+        ];
+
+        if (userMarkerRef.current) {
+          userMarkerRef.current.setLatLng(positionLatLng);
+        } else {
+          userMarkerRef.current = L.marker(positionLatLng, {
+            icon: L.divIcon({
+              className: "",
+              html: `<div style="
+                width:18px;height:18px;border-radius:50%;
+                background:#2563eb;border:4px solid white;
+                box-shadow:0 0 0 4px rgba(37,99,235,.25);
+              "></div>`,
+              iconSize: [18, 18],
+              iconAnchor: [9, 9],
+            }),
+          }).addTo(map);
+        }
+
+        userMarkerRef.current.bindPopup(
+          `Your detected location<br>Accuracy: ${Math.round(accuracy)} m`
+        );
+
+        map.setView(positionLatLng, 17);
+        userMarkerRef.current.openPopup();
+
+        setLocationMessage(
+          `Location detected. Accuracy: approximately ${Math.round(accuracy)} m.`
+        );
+      },
+      (error) => {
+        if (requestId !== locationRequestId.current) return;
+
+        setLocating(false);
+
+        const messages: Record<number, string> = {
+          1: "Location permission denied. Allow location access in your browser settings.",
+          2: "Your position is unavailable. Enable GPS and try outdoors.",
+          3: "GPS request timed out. Try again where the GPS signal is stronger.",
+        };
+
+        setLocationMessage(
+          messages[error.code] ||
+            "Could not detect your location. Please try again."
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 30000,
+        maximumAge: 0,
+      }
+    );
+  };
 
   return (
     <div className="rounded-xl overflow-hidden border shadow-sm bg-white">
       <div className="p-4 border-b">
-        <h2 className="text-lg font-semibold text-gray-800">
-          Issue Map
-        </h2>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="text-lg font-semibold text-gray-800">
+            CivicPlus Issue Map
+          </h2>
+
+          <button
+            type="button"
+            onClick={detectMyLocation}
+            disabled={locating}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60"
+          >
+            {locating ? "Detecting GPS..." : "Use My Location"}
+          </button>
+        </div>
+
+        {locationMessage && (
+          <p
+            role="status"
+            aria-live="polite"
+            className="mt-3 text-sm text-gray-700"
+          >
+            {locationMessage}
+          </p>
+        )}
+
+        {gpsAccuracy !== null && gpsAccuracy > 100 && (
+          <p className="mt-1 text-xs text-amber-700">
+            Reported GPS accuracy: {Math.round(gpsAccuracy)} meters.
+            The map has not treated this reading as precise.
+          </p>
+        )}
 
         <div className="flex flex-wrap gap-4 mt-3 text-sm">
           <div className="flex items-center gap-2">
@@ -344,6 +485,14 @@ export default function MapView({
               style={{ backgroundColor: "#22c55e" }}
             />
             <span>Resolved ({resolvedCount})</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-block w-3 h-3 rounded-full"
+              style={{ backgroundColor: "#2563eb" }}
+            />
+            <span>My Location</span>
           </div>
         </div>
       </div>
