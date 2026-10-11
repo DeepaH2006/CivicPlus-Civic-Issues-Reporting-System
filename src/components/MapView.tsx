@@ -318,114 +318,129 @@ export default function MapView({
   }, [complaints, defaultCenter, defaultZoom, onMarkerClick]);
 
   // Request a fresh high-accuracy browser location.
-  const detectMyLocation = () => {
-    const map = mapRef.current;
+  
+const detectMyLocation = () => {
+  const map = mapRef.current;
 
-    if (!map) {
-      setLocationMessage("The map is still loading. Please try again.");
-      return;
-    }
+  if (!map || !navigator.geolocation) {
+    setLocationMessage(
+      "Location is unavailable. Please check your browser and try again."
+    );
+    return;
+  }
 
-    if (!navigator.geolocation) {
-      setLocationMessage(
-        "Geolocation is not supported by this browser."
-      );
-      return;
-    }
+  if (!window.isSecureContext) {
+    setLocationMessage(
+      "Location requires HTTPS. Open the secure deployed website."
+    );
+    return;
+  }
 
-    if (!window.isSecureContext) {
-      setLocationMessage(
-        "GPS requires HTTPS. Open the deployed website using its HTTPS URL."
-      );
-      return;
-    }
+  // Cancel any earlier location watch.
+  if (locationRequestId.current) {
+    navigator.geolocation.clearWatch(locationRequestId.current);
+  }
 
-    const requestId = ++locationRequestId.current;
+  setLocating(true);
+  setGpsAccuracy(null);
+  setLocationMessage(
+    "Searching for a more accurate GPS reading. Keep the page open and wait..."
+  );
 
-    setLocating(true);
-    setLocationMessage("Requesting a fresh high-accuracy GPS location...");
-    setGpsAccuracy(null);
+  let bestAccuracy = Infinity;
+  let finished = false;
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        if (requestId !== locationRequestId.current) return;
+  const watchId = navigator.geolocation.watchPosition(
+    (position) => {
+      const { latitude, longitude, accuracy } = position.coords;
 
-        const { latitude, longitude, accuracy } = position.coords;
+      console.log("GPS reading:", {
+        latitude,
+        longitude,
+        accuracyMeters: accuracy,
+      });
 
-        setLocating(false);
+      // Retain the best reading received so far.
+      if (accuracy < bestAccuracy) {
+        bestAccuracy = accuracy;
         setGpsAccuracy(accuracy);
+      }
 
-        console.log("CivicPlus GPS result:", {
-          latitude,
-          longitude,
-          accuracyMeters: accuracy,
-        });
+      // Accept a reading only if it meets the chosen threshold.
+      if (accuracy <= 50 && !finished) {
+        finished = true;
+        navigator.geolocation.clearWatch(watchId);
+        locationRequestId.current = 0;
+        setLocating(false);
 
-        // Do not silently accept a very inaccurate location.
-        if (accuracy > 100) {
-          setLocationMessage(
-            `Location accuracy is about ${Math.round(accuracy)} m. ` +
-            "Move outdoors, enable phone GPS, and retry. This location has not been accepted as precise."
-          );
-          return;
-        }
-
-        const positionLatLng: L.LatLngExpression = [
-          latitude,
-          longitude,
-        ];
+        const point: L.LatLngExpression = [latitude, longitude];
 
         if (userMarkerRef.current) {
-          userMarkerRef.current.setLatLng(positionLatLng);
+          userMarkerRef.current.setLatLng(point);
         } else {
-          userMarkerRef.current = L.marker(positionLatLng, {
-            icon: L.divIcon({
-              className: "",
-              html: `<div style="
-                width:18px;height:18px;border-radius:50%;
-                background:#2563eb;border:4px solid white;
-                box-shadow:0 0 0 4px rgba(37,99,235,.25);
-              "></div>`,
-              iconSize: [18, 18],
-              iconAnchor: [9, 9],
-            }),
-          }).addTo(map);
+          userMarkerRef.current = L.marker(point).addTo(map);
         }
 
         userMarkerRef.current.bindPopup(
-          `Your detected location<br>Accuracy: ${Math.round(accuracy)} m`
+          `Your location<br>Accuracy: ${Math.round(accuracy)} m`
         );
 
-        map.setView(positionLatLng, 17);
+        map.setView(point, 17);
         userMarkerRef.current.openPopup();
 
         setLocationMessage(
-          `Location detected. Accuracy: approximately ${Math.round(accuracy)} m.`
+          `Location detected with approximately ${Math.round(accuracy)} m accuracy.`
         );
-      },
-      (error) => {
-        if (requestId !== locationRequestId.current) return;
-
-        setLocating(false);
-
-        const messages: Record<number, string> = {
-          1: "Location permission denied. Allow location access in your browser settings.",
-          2: "Your position is unavailable. Enable GPS and try outdoors.",
-          3: "GPS request timed out. Try again where the GPS signal is stronger.",
-        };
-
+      } else if (!finished) {
         setLocationMessage(
-          messages[error.code] ||
-            "Could not detect your location. Please try again."
+          `Best accuracy so far: ${Math.round(bestAccuracy)} m. ` +
+          "Keep GPS enabled and try outdoors."
         );
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 30000,
-        maximumAge: 0,
       }
-    );
-  };
+    },
+    (error) => {
+      if (finished) return;
+
+      finished = true;
+      navigator.geolocation.clearWatch(watchId);
+      locationRequestId.current = 0;
+      setLocating(false);
+
+      setLocationMessage(
+        error.code === 1
+          ? "Location permission denied. Allow location access in your browser."
+          : error.code === 3
+          ? "GPS timed out. Try again outdoors."
+          : "Position unavailable. Enable your phone's Location setting and retry."
+      );
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 60000,
+    }
+  );
+
+  locationRequestId.current = watchId;
+
+  // Stop watching after 60 seconds if no accurate reading arrives.
+  window.setTimeout(() => {
+    if (!finished) {
+      finished = true;
+      navigator.geolocation.clearWatch(watchId);
+      locationRequestId.current = 0;
+      setLocating(false);
+
+      setLocationMessage(
+        `Could not achieve 50 m accuracy. Best reading: ${
+          Number.isFinite(bestAccuracy)
+            ? Math.round(bestAccuracy) + " m"
+            : "unavailable"
+        }. Try outdoors with your phone's GPS enabled.`
+      );
+    }
+  }, 60000);
+};
 
   return (
     <div className="rounded-xl overflow-hidden border shadow-sm bg-white">
