@@ -4,7 +4,6 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Complaint } from "@/data/store";
 
-// Fix default Leaflet marker icons.
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 
 L.Icon.Default.mergeOptions({
@@ -22,12 +21,23 @@ const statusColors: Record<string, string> = {
   Resolved: "#22c55e",
 };
 
+const GPS_ACCURACY_LIMIT = 100;
+
+interface SelectedLocation {
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  source: "gps" | "manual" | "map";
+  accuracy: number | null;
+}
+
 interface MapViewProps {
   complaints: Complaint[];
   height?: string;
   center?: [number, number];
   zoom?: number;
   onMarkerClick?: (complaint: Complaint) => void;
+  onLocationSelect?: (location: SelectedLocation) => void;
 }
 
 type ComplaintWithCoordinates = Complaint & {
@@ -56,35 +66,19 @@ function getCoordinate(
 
   const number = Number(value);
 
-  if (
-    !Number.isFinite(number) ||
-    number < min ||
-    number > max
-  ) {
+  if (!Number.isFinite(number) || number < min || number > max) {
     return null;
   }
 
   return number;
 }
 
-function getLat(
-  complaint: ComplaintWithCoordinates
-): number | null {
-  return getCoordinate(
-    complaint.lat ?? complaint.latitude,
-    -90,
-    90
-  );
+function getLat(c: ComplaintWithCoordinates): number | null {
+  return getCoordinate(c.lat ?? c.latitude, -90, 90);
 }
 
-function getLng(
-  complaint: ComplaintWithCoordinates
-): number | null {
-  return getCoordinate(
-    complaint.long ?? complaint.longitude,
-    -180,
-    180
-  );
+function getLng(c: ComplaintWithCoordinates): number | null {
+  return getCoordinate(c.long ?? c.longitude, -180, 180);
 }
 
 function createIcon(status: string) {
@@ -103,43 +97,38 @@ function createIcon(status: string) {
   });
 }
 
-function createPopup(
-  complaint: ComplaintWithCoordinates,
-  index: number
-) {
+function createPopup(c: ComplaintWithCoordinates, index: number) {
   const root = document.createElement("div");
   root.style.minWidth = "180px";
 
   const title = document.createElement("p");
   title.className = "font-bold text-sm";
-  title.textContent =
-    complaint.id || complaint._id || `Complaint ${index + 1}`;
+  title.textContent = c.id || c._id || `Complaint ${index + 1}`;
 
   const description = document.createElement("p");
   description.className = "text-xs mt-1";
 
-  const text = complaint.description || "No description available";
+  const desc = c.description || "No description available";
   description.textContent =
-    text.length > 80 ? `${text.slice(0, 80)}...` : text;
+    desc.length > 80 ? `${desc.slice(0, 80)}...` : desc;
 
   const details = document.createElement("div");
   details.className = "mt-2 flex gap-2 items-center flex-wrap";
 
   const status = document.createElement("span");
   status.className = "text-xs rounded px-2 py-0.5";
-  status.style.backgroundColor =
-    statusColors[complaint.status] || "#6b7280";
-  status.style.color = "#ffffff";
-  status.textContent = complaint.status || "Unknown";
+  status.style.backgroundColor = statusColors[c.status] || "#6b7280";
+  status.style.color = "#fff";
+  status.textContent = c.status || "Unknown";
 
   const category = document.createElement("span");
   category.className = "text-xs";
-  category.textContent = complaint.category || "General";
+  category.textContent = c.category || "General";
 
   details.append(status, category);
   root.append(title, description, details);
 
-  const address = complaint.address ?? complaint.location;
+  const address = c.address ?? c.location;
 
   if (typeof address === "string" && address.trim()) {
     const addressElement = document.createElement("p");
@@ -157,16 +146,22 @@ export default function MapView({
   center,
   zoom,
   onMarkerClick,
+  onLocationSelect,
 }: MapViewProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
-  const locationRequestId = useRef(0);
+  const gpsWatchRef = useRef<number | null>(null);
+  const gpsTimerRef = useRef<number | null>(null);
+  const bestPositionRef = useRef<GeolocationPosition | null>(null);
 
   const [locating, setLocating] = useState(false);
   const [locationMessage, setLocationMessage] = useState("");
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [manualAddress, setManualAddress] = useState("");
+  const [selectedLocation, setSelectedLocation] =
+    useState<SelectedLocation | null>(null);
 
   const defaultCenter = useMemo<[number, number]>(
     () => center ?? [13.0827, 80.2707],
@@ -192,7 +187,24 @@ export default function MapView({
     (c) => c.status === "Resolved"
   ).length;
 
-  // Initialize Leaflet once.
+  function stopGpsWatch() {
+    if (gpsWatchRef.current !== null) {
+      navigator.geolocation?.clearWatch(gpsWatchRef.current);
+      gpsWatchRef.current = null;
+    }
+
+    if (gpsTimerRef.current !== null) {
+      window.clearTimeout(gpsTimerRef.current);
+      gpsTimerRef.current = null;
+    }
+  }
+
+  function publishLocation(location: SelectedLocation) {
+    setSelectedLocation(location);
+    onLocationSelect?.(location);
+  }
+
+  // Initialize Leaflet.
   useEffect(() => {
     const container = mapContainerRef.current;
 
@@ -206,25 +218,50 @@ export default function MapView({
       scrollWheelZoom: true,
     });
 
-    L.tileLayer(
-      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19,
-      }
-    ).addTo(map);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
 
     const layer = L.layerGroup().addTo(map);
 
     mapRef.current = map;
     markersLayerRef.current = layer;
 
-    const resizeObserver = new ResizeObserver(() => {
+    // Let citizens select an approximate location directly on the map.
+    map.on("click", (event: L.LeafletMouseEvent) => {
+      const { lat, lng } = event.latlng;
+
+      if (userMarkerRef.current) {
+        userMarkerRef.current.setLatLng([lat, lng]);
+      } else {
+        userMarkerRef.current = L.marker([lat, lng]).addTo(map);
+      }
+
+      userMarkerRef.current.bindPopup(
+        "Selected issue location"
+      ).openPopup();
+
+      setGpsAccuracy(null);
+      setLocationMessage(
+        "Map location selected. Confirm the address in the field below."
+      );
+
+      publishLocation({
+        address: manualAddress.trim(),
+        latitude: lat,
+        longitude: lng,
+        source: "map",
+        accuracy: null,
+      });
+    });
+
+    const observer = new ResizeObserver(() => {
       map.invalidateSize({ pan: false });
     });
 
-    resizeObserver.observe(container);
+    observer.observe(container);
 
     const timer = window.setTimeout(() => {
       map.invalidateSize({ pan: false });
@@ -232,16 +269,19 @@ export default function MapView({
 
     return () => {
       window.clearTimeout(timer);
-      resizeObserver.disconnect();
+      observer.disconnect();
+      stopGpsWatch();
       map.remove();
 
       mapRef.current = null;
       markersLayerRef.current = null;
       userMarkerRef.current = null;
     };
+    // Map initialization is intentionally performed once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Render complaint markers.
+  // Display complaint markers.
   useEffect(() => {
     const map = mapRef.current;
     const layer = markersLayerRef.current;
@@ -269,183 +309,207 @@ export default function MapView({
       );
 
     validComplaints.forEach(({ complaint, lat, lng }, index) => {
-      const marker = L.marker([lat, lng], {
+      L.marker([lat, lng], {
         icon: createIcon(complaint.status),
-      });
-
-      marker.bindPopup(createPopup(complaint, index));
-
-      marker.on("click", () => {
-        onMarkerClick?.(complaint as Complaint);
-      });
-
-      marker.addTo(layer);
+      })
+        .bindPopup(createPopup(complaint, index))
+        .on("click", () => onMarkerClick?.(complaint as Complaint))
+        .addTo(layer);
     });
 
-    if (validComplaints.length === 0) {
-      // Do not reset the map if the user has already located themselves.
-      if (!userMarkerRef.current) {
-        map.setView(defaultCenter, defaultZoom);
-      }
-      return;
-    }
+    // Do not move away from a location the user has already selected.
+    if (selectedLocation) return;
 
-    // Keep the complaint markers visible without overriding a user's
-    // current GPS view unnecessarily.
-    if (!userMarkerRef.current) {
-      if (validComplaints.length === 1) {
-        const item = validComplaints[0];
-        map.setView([item.lat, item.lng], Math.max(defaultZoom, 15));
-      } else {
-        const bounds = L.latLngBounds(
+    if (validComplaints.length === 0) {
+      map.setView(defaultCenter, defaultZoom);
+    } else if (validComplaints.length === 1) {
+      const item = validComplaints[0];
+      map.setView([item.lat, item.lng], Math.max(defaultZoom, 15));
+    } else {
+      map.fitBounds(
+        L.latLngBounds(
           validComplaints.map(
             ({ lat, lng }) => [lat, lng] as [number, number]
           )
-        );
+        ),
+        { padding: [40, 40], maxZoom: 16 }
+      );
+    }
+  }, [
+    complaints,
+    defaultCenter,
+    defaultZoom,
+    onMarkerClick,
+    selectedLocation,
+  ]);
 
-        map.fitBounds(bounds, {
-          padding: [40, 40],
-          maxZoom: 16,
-        });
-      }
+  // Request repeated high-accuracy GPS readings for up to 60 seconds.
+  function detectMyLocation() {
+    const map = mapRef.current;
+
+    if (!map) {
+      setLocationMessage("Map is loading. Please try again.");
+      return;
     }
 
-    const timer = window.setTimeout(() => {
-      map.invalidateSize({ pan: false });
-    }, 200);
+    if (!navigator.geolocation) {
+      setLocationMessage(
+        "Your browser does not support location detection. Enter your address manually."
+      );
+      return;
+    }
 
-    return () => window.clearTimeout(timer);
-  }, [complaints, defaultCenter, defaultZoom, onMarkerClick]);
+    if (!window.isSecureContext) {
+      setLocationMessage(
+        "GPS requires HTTPS. Open the secure deployed website or enter your address manually."
+      );
+      return;
+    }
 
-  // Request a fresh high-accuracy browser location.
-  
-const detectMyLocation = () => {
-  const map = mapRef.current;
-
-  if (!map || !navigator.geolocation) {
+    stopGpsWatch();
+    bestPositionRef.current = null;
+    setLocating(true);
+    setGpsAccuracy(null);
     setLocationMessage(
-      "Location is unavailable. Please check your browser and try again."
+      "Searching for an accurate location. Keep the page open..."
     );
-    return;
-  }
 
-  if (!window.isSecureContext) {
-    setLocationMessage(
-      "Location requires HTTPS. Open the secure deployed website."
-    );
-    return;
-  }
+    let finished = false;
 
-  // Cancel any earlier location watch.
-  if (locationRequestId.current) {
-    navigator.geolocation.clearWatch(locationRequestId.current);
-  }
+    const finishWithBestReading = () => {
+      if (finished) return;
+      finished = true;
+      stopGpsWatch();
+      setLocating(false);
 
-  setLocating(true);
-  setGpsAccuracy(null);
-  setLocationMessage(
-    "Searching for a more accurate GPS reading. Keep the page open and wait..."
-  );
+      const best = bestPositionRef.current;
 
-  let bestAccuracy = Infinity;
-  let finished = false;
+      if (!best || best.coords.accuracy > GPS_ACCURACY_LIMIT) {
+        const accuracy = best
+          ? Math.round(best.coords.accuracy)
+          : null;
 
-  const watchId = navigator.geolocation.watchPosition(
-    (position) => {
-      const { latitude, longitude, accuracy } = position.coords;
+        setLocationMessage(
+          accuracy !== null
+            ? `GPS accuracy is about ${accuracy} m. This reading was not accepted as precise. Enter the address manually or select a point on the map.`
+            : "Could not obtain your location. Enter the address manually or select a point on the map."
+        );
+        return;
+      }
 
-      console.log("GPS reading:", {
+      const { latitude, longitude, accuracy } = best.coords;
+      const point: L.LatLngExpression = [latitude, longitude];
+
+      if (userMarkerRef.current) {
+        userMarkerRef.current.setLatLng(point);
+      } else {
+        userMarkerRef.current = L.marker(point).addTo(map);
+      }
+
+      userMarkerRef.current
+        .bindPopup(`GPS location<br>Accuracy: ${Math.round(accuracy)} m`)
+        .openPopup();
+
+      map.setView(point, 17);
+
+      publishLocation({
+        address: "",
         latitude,
         longitude,
-        accuracyMeters: accuracy,
+        source: "gps",
+        accuracy,
       });
 
-      // Retain the best reading received so far.
-      if (accuracy < bestAccuracy) {
-        bestAccuracy = accuracy;
-        setGpsAccuracy(accuracy);
-      }
+      setGpsAccuracy(accuracy);
+      setLocationMessage(
+        `GPS location selected with approximately ${Math.round(accuracy)} m accuracy.`
+      );
+    };
 
-      // Accept a reading only if it meets the chosen threshold.
-      if (accuracy <= 50 && !finished) {
-        finished = true;
-        navigator.geolocation.clearWatch(watchId);
-        locationRequestId.current = 0;
-        setLocating(false);
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        if (finished) return;
 
-        const point: L.LatLngExpression = [latitude, longitude];
-
-        if (userMarkerRef.current) {
-          userMarkerRef.current.setLatLng(point);
-        } else {
-          userMarkerRef.current = L.marker(point).addTo(map);
+        if (
+          !bestPositionRef.current ||
+          position.coords.accuracy <
+            bestPositionRef.current.coords.accuracy
+        ) {
+          bestPositionRef.current = position;
+          setGpsAccuracy(position.coords.accuracy);
         }
 
-        userMarkerRef.current.bindPopup(
-          `Your location<br>Accuracy: ${Math.round(accuracy)} m`
-        );
+        if (position.coords.accuracy <= GPS_ACCURACY_LIMIT) {
+          finishWithBestReading();
+        } else {
+          setLocationMessage(
+            `Best GPS accuracy so far: ${Math.round(
+              bestPositionRef.current.coords.accuracy
+            )} m. You can enter an address manually if it does not improve.`
+          );
+        }
+      },
+      (error) => {
+        if (finished) return;
 
-        map.setView(point, 17);
-        userMarkerRef.current.openPopup();
+        finished = true;
+        stopGpsWatch();
+        setLocating(false);
 
         setLocationMessage(
-          `Location detected with approximately ${Math.round(accuracy)} m accuracy.`
+          error.code === 1
+            ? "Location permission denied. Allow browser location access, or enter the address manually."
+            : error.code === 3
+            ? "GPS request timed out. Try outdoors or enter the address manually."
+            : "Location is unavailable. Enable phone GPS or enter the address manually."
         );
-      } else if (!finished) {
-        setLocationMessage(
-          `Best accuracy so far: ${Math.round(bestAccuracy)} m. ` +
-          "Keep GPS enabled and try outdoors."
-        );
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 60000,
       }
-    },
-    (error) => {
-      if (finished) return;
+    );
 
-      finished = true;
-      navigator.geolocation.clearWatch(watchId);
-      locationRequestId.current = 0;
-      setLocating(false);
+    gpsWatchRef.current = watchId;
 
-      setLocationMessage(
-        error.code === 1
-          ? "Location permission denied. Allow location access in your browser."
-          : error.code === 3
-          ? "GPS timed out. Try again outdoors."
-          : "Position unavailable. Enable your phone's Location setting and retry."
-      );
-    },
-    {
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 60000,
+    gpsTimerRef.current = window.setTimeout(() => {
+      finishWithBestReading();
+    }, 60000);
+  }
+
+  function useManualAddress(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const address = manualAddress.trim();
+
+    if (!address) {
+      setLocationMessage("Please enter an address.");
+      return;
     }
-  );
 
-  locationRequestId.current = watchId;
+    stopGpsWatch();
+    setLocating(false);
+    setGpsAccuracy(null);
 
-  // Stop watching after 60 seconds if no accurate reading arrives.
-  window.setTimeout(() => {
-    if (!finished) {
-      finished = true;
-      navigator.geolocation.clearWatch(watchId);
-      locationRequestId.current = 0;
-      setLocating(false);
+    // A manually typed address does not automatically provide coordinates.
+    publishLocation({
+      address,
+      latitude: null,
+      longitude: null,
+      source: "manual",
+      accuracy: null,
+    });
 
-      setLocationMessage(
-        `Could not achieve 50 m accuracy. Best reading: ${
-          Number.isFinite(bestAccuracy)
-            ? Math.round(bestAccuracy) + " m"
-            : "unavailable"
-        }. Try outdoors with your phone's GPS enabled.`
-      );
-    }
-  }, 60000);
-};
+    setLocationMessage(
+      "Manual address selected. Confirm the address before submitting the complaint."
+    );
+  }
 
   return (
     <div className="rounded-xl overflow-hidden border shadow-sm bg-white">
       <div className="p-4 border-b">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-gray-800">
             CivicPlus Issue Map
           </h2>
@@ -461,54 +525,93 @@ const detectMyLocation = () => {
         </div>
 
         {locationMessage && (
-          <p
-            role="status"
-            aria-live="polite"
-            className="mt-3 text-sm text-gray-700"
-          >
+          <p role="status" aria-live="polite" className="mt-3 text-sm text-gray-700">
             {locationMessage}
           </p>
         )}
 
-        {gpsAccuracy !== null && gpsAccuracy > 100 && (
-          <p className="mt-1 text-xs text-amber-700">
-            Reported GPS accuracy: {Math.round(gpsAccuracy)} meters.
-            The map has not treated this reading as precise.
+        {gpsAccuracy !== null && (
+          <p className="mt-1 text-xs text-gray-600">
+            Reported GPS accuracy: approximately {Math.round(gpsAccuracy)} m.
           </p>
         )}
 
+        <form
+          onSubmit={useManualAddress}
+          className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3"
+        >
+          <label
+            htmlFor="manual-location"
+            className="block text-sm font-semibold text-gray-800 mb-1"
+          >
+            Enter the issue address manually
+          </label>
+
+          <p className="text-xs text-gray-600 mb-3">
+            If GPS is inaccurate or unavailable, enter the street,
+            area, nearby landmark, or full address.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              id="manual-location"
+              type="text"
+              value={manualAddress}
+              onChange={(event) => setManualAddress(event.target.value)}
+              placeholder="Street, area, landmark, or address"
+              maxLength={300}
+              required
+              className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+            />
+
+            <button
+              type="submit"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900"
+            >
+              Use This Address
+            </button>
+          </div>
+        </form>
+
+        {selectedLocation && (
+          <div className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">
+            <p className="font-semibold">Selected location</p>
+            <p className="mt-1">
+              Source:{" "}
+              {selectedLocation.source === "gps"
+                ? "GPS"
+                : selectedLocation.source === "map"
+                ? "Map selection"
+                : "Manual address"}
+            </p>
+
+            {selectedLocation.address && (
+              <p className="mt-1">
+                Address: {selectedLocation.address}
+              </p>
+            )}
+
+            {selectedLocation.latitude !== null &&
+              selectedLocation.longitude !== null && (
+                <p className="mt-1 break-all">
+                  Coordinates: {selectedLocation.latitude.toFixed(6)},{" "}
+                  {selectedLocation.longitude.toFixed(6)}
+                </p>
+              )}
+          </div>
+        )}
+
+        <p className="mt-3 text-xs text-gray-500">
+          You can also click directly on the map to select the issue location.
+          Map selections provide coordinates, but do not automatically identify
+          the street address.
+        </p>
+
         <div className="flex flex-wrap gap-4 mt-3 text-sm">
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block w-3 h-3 rounded-full"
-              style={{ backgroundColor: "#ef4444" }}
-            />
-            <span>Pending ({pendingCount})</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block w-3 h-3 rounded-full"
-              style={{ backgroundColor: "#f59e0b" }}
-            />
-            <span>In Progress ({inProgressCount})</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block w-3 h-3 rounded-full"
-              style={{ backgroundColor: "#22c55e" }}
-            />
-            <span>Resolved ({resolvedCount})</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block w-3 h-3 rounded-full"
-              style={{ backgroundColor: "#2563eb" }}
-            />
-            <span>My Location</span>
-          </div>
+          <span>🔴 Pending ({pendingCount})</span>
+          <span>🟠 In Progress ({inProgressCount})</span>
+          <span>🟢 Resolved ({resolvedCount})</span>
+          <span>🔵 Selected location</span>
         </div>
       </div>
 
