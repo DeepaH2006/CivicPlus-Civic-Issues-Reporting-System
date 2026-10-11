@@ -1,6 +1,5 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Complaint } from "@/data/store";
@@ -141,6 +140,7 @@ function createPopup(c: ComplaintWithCoordinates, index: number) {
   return root;
 }
 
+// Convert a typed address into map coordinates.
 async function geocodeAddress(address: string) {
   const url = new URL(
     "https://nominatim.openstreetmap.org/search"
@@ -162,7 +162,7 @@ async function geocodeAddress(address: string) {
 
   if (!Array.isArray(results) || results.length === 0) {
     throw new Error(
-      "Address not found. Try including the street, area, city, or nearby landmark."
+      "Address not found. Include the street, area, city, or a nearby landmark."
     );
   }
 
@@ -289,11 +289,14 @@ export default function MapView({
       scrollWheelZoom: true,
     });
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 19,
-    }).addTo(map);
+    L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19,
+      }
+    ).addTo(map);
 
     const layer = L.layerGroup().addTo(map);
 
@@ -390,7 +393,10 @@ export default function MapView({
       map.setView(defaultCenter, defaultZoom);
     } else if (validComplaints.length === 1) {
       const item = validComplaints[0];
-      map.setView([item.lat, item.lng], Math.max(defaultZoom, 15));
+      map.setView(
+        [item.lat, item.lng],
+        Math.max(defaultZoom, 15)
+      );
     } else {
       map.fitBounds(
         L.latLngBounds(
@@ -409,7 +415,7 @@ export default function MapView({
     selectedLocation,
   ]);
 
-  // GPS location detection.
+  // Detect GPS location.
   function detectMyLocation() {
     const map = mapRef.current;
 
@@ -427,7 +433,7 @@ export default function MapView({
 
     if (!window.isSecureContext) {
       setLocationMessage(
-        "GPS requires HTTPS. Open the secure website or enter your address manually."
+        "GPS requires HTTPS. Enter your address manually or open the secure website."
       );
       return;
     }
@@ -536,12 +542,9 @@ export default function MapView({
     }, 60000);
   }
 
-  // Search for a typed address and place its marker on the map.
-  async function useManualAddress(
-    event: FormEvent<HTMLFormElement>
-  ) {
-    event.preventDefault();
-
+  // Search and select the typed address without submitting
+  // the parent complaint form or navigating to another page.
+  async function useManualAddress() {
     const address = manualAddress.trim();
 
     if (!address) {
@@ -576,7 +579,9 @@ export default function MapView({
         accuracy: null,
       });
 
-      setLocationMessage("Address found and selected on the map.");
+      setLocationMessage(
+        "Address found and selected on the map."
+      );
     } catch (error) {
       setLocationMessage(
         error instanceof Error
@@ -618,14 +623,13 @@ export default function MapView({
 
         {gpsAccuracy !== null && (
           <p className="mt-1 text-xs text-gray-600">
-            Reported GPS accuracy: approximately {Math.round(gpsAccuracy)} m.
+            Reported GPS accuracy: approximately{" "}
+            {Math.round(gpsAccuracy)} m.
           </p>
         )}
 
-        <form
-          onSubmit={useManualAddress}
-          className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3"
-        >
+        {/* Use a div rather than a nested form. */}
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
           <label
             htmlFor="manual-location"
             className="block text-sm font-semibold text-gray-800 mb-1"
@@ -646,21 +650,29 @@ export default function MapView({
                 setManualAddress(event.target.value);
                 manualAddressRef.current = event.target.value;
               }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void useManualAddress();
+                }
+              }}
               placeholder="Street, area, landmark, or address"
               maxLength={300}
-              required
               className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
             />
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => void useManualAddress()}
               disabled={locating}
               className="rounded-lg px-4 py-2 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 disabled:opacity-60"
             >
-              {locating ? "Searching Address..." : "Use This Address"}
+              {locating
+                ? "Searching Address..."
+                : "Use This Address"}
             </button>
           </div>
-        </form>
+        </div>
 
         {selectedLocation && (
           <div className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">
@@ -684,7 +696,8 @@ export default function MapView({
             {selectedLocation.latitude !== null &&
               selectedLocation.longitude !== null && (
                 <p className="mt-1 break-all">
-                  Coordinates: {selectedLocation.latitude.toFixed(6)},{" "}
+                  Coordinates:{" "}
+                  {selectedLocation.latitude.toFixed(6)},{" "}
                   {selectedLocation.longitude.toFixed(6)}
                 </p>
               )}
@@ -692,8 +705,8 @@ export default function MapView({
         )}
 
         <p className="mt-3 text-xs text-gray-500">
-          You can also click the map to select a location. Map clicks provide
-          coordinates but do not automatically identify the street address.
+          You can also click the map to select a location. Map clicks
+          provide coordinates but do not automatically identify the street address.
         </p>
 
         <div className="flex flex-wrap gap-4 mt-3 text-sm">
