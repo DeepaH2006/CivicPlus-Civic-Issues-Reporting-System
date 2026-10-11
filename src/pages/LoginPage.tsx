@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -21,6 +22,7 @@ export default function LoginPage() {
     email: "",
     password: "",
     role: "Citizen" as Role,
+    verificationCode: "",
   });
 
   const roleRedirect: Record<Role, string> = {
@@ -32,8 +34,26 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!form.email || !form.password) {
+    if (!form.email.trim() || !form.password) {
       toast.error("Please enter email and password");
+      return;
+    }
+
+    if (isSignup && !form.name.trim()) {
+      toast.error("Please enter your name");
+      return;
+    }
+
+    if (
+      isSignup &&
+      form.role !== "Citizen" &&
+      !form.verificationCode.trim()
+    ) {
+      toast.error(
+        form.role === "Admin"
+          ? "Please enter the Admin Verification Code"
+          : "Please enter the Staff Verification Code"
+      );
       return;
     }
 
@@ -42,22 +62,30 @@ export default function LoginPage() {
     try {
       if (isSignup) {
         const res = await signup(
-          form.name,
-          form.email,
+          form.name.trim(),
+          form.email.trim(),
           form.password,
-          form.role
+          form.role,
+          form.role === "Citizen"
+            ? undefined
+            : form.verificationCode.trim()
         );
 
-        if (res.success) {
-          toast.success("Account created successfully");
-          navigate(roleRedirect[form.role]);
-        } else {
+        if (!res.success) {
           toast.error(res.error || "Signup failed");
+          return;
         }
+
+        toast.success("Account created successfully");
+        navigate(roleRedirect[form.role]);
         return;
       }
 
-      const res = await login(form.email, form.password);
+      // Login does not require a verification code.
+      const res = await login(
+        form.email.trim(),
+        form.password
+      );
 
       if (!res.success) {
         toast.error(res.error || "Login failed");
@@ -65,11 +93,13 @@ export default function LoginPage() {
       }
 
       let savedUser: any = {};
+
       try {
-        savedUser = JSON.parse(localStorage.getItem("civic_user") || "{}");
+        savedUser = JSON.parse(
+          localStorage.getItem("civic_user") || "{}"
+        );
       } catch (error) {
         console.error("Local storage parse error:", error);
-        savedUser = {};
       }
 
       toast.success("Login successful");
@@ -81,7 +111,7 @@ export default function LoginPage() {
       } else {
         navigate("/dashboard");
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Login/Signup error:", error);
       toast.error("Backend server not reachable");
     } finally {
@@ -89,13 +119,38 @@ export default function LoginPage() {
     }
   };
 
+  // Existing demo accounts preserved.
   const quickLogins = [
-    { label: "👤 Admin", email: "admin@gmail.com", password: "admin123" },
-    { label: "👥 Citizen", email: "citizen@gmail.com", password: "123456" },
-    { label: "💧 Water Staff", email: "water@gmail.com", password: "123456" },
-    { label: "🗑️ Garbage Staff", email: "garbage@gmail.com", password: "123456" },
-    { label: "🕳️ Road Staff", email: "road@gmail.com", password: "123456" },
-    { label: "💡 Electrical Staff", email: "electrical@gmail.com", password: "123456" },
+    {
+      label: "👤 Admin",
+      email: "admin@gmail.com",
+      password: "admin123",
+    },
+    {
+      label: "👥 Citizen",
+      email: "citizen@gmail.com",
+      password: "123456",
+    },
+    {
+      label: "💧 Water Staff",
+      email: "water@gmail.com",
+      password: "123456",
+    },
+    {
+      label: "🗑️ Garbage Staff",
+      email: "garbage@gmail.com",
+      password: "123456",
+    },
+    {
+      label: "🕳️ Road Staff",
+      email: "road@gmail.com",
+      password: "123456",
+    },
+    {
+      label: "💡 Electrical Staff",
+      email: "electrical@gmail.com",
+      password: "123456",
+    },
   ];
 
   return (
@@ -110,8 +165,9 @@ export default function LoginPage() {
             </div>
 
             <h1 className="font-heading text-3xl font-bold text-primary-foreground">
-              CivicPulse
+              CivicPluse
             </h1>
+
             <p className="text-primary-foreground/70 mt-1 text-sm">
               Crowdsourced Civic Issue Reporting
             </p>
@@ -151,7 +207,10 @@ export default function LoginPage() {
                   <Input
                     value={form.name}
                     onChange={(e) =>
-                      setForm({ ...form, name: e.target.value })
+                      setForm({
+                        ...form,
+                        name: e.target.value,
+                      })
                     }
                     placeholder="Your name"
                     required
@@ -165,7 +224,10 @@ export default function LoginPage() {
                   type="email"
                   value={form.email}
                   onChange={(e) =>
-                    setForm({ ...form, email: e.target.value })
+                    setForm({
+                      ...form,
+                      email: e.target.value,
+                    })
                   }
                   placeholder="email@example.com"
                   required
@@ -179,15 +241,26 @@ export default function LoginPage() {
                     type={showPassword ? "text" : "password"}
                     value={form.password}
                     onChange={(e) =>
-                      setForm({ ...form, password: e.target.value })
+                      setForm({
+                        ...form,
+                        password: e.target.value,
+                      })
                     }
                     placeholder="••••••••"
                     required
                   />
+
                   <button
                     type="button"
-                    onClick={() => setShowPassword(!showPassword)}
+                    onClick={() =>
+                      setShowPassword(!showPassword)
+                    }
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                    aria-label={
+                      showPassword
+                        ? "Hide password"
+                        : "Show password"
+                    }
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -201,10 +274,15 @@ export default function LoginPage() {
               {isSignup && (
                 <div>
                   <Label className="text-foreground">Role</Label>
+
                   <select
                     value={form.role}
                     onChange={(e) =>
-                      setForm({ ...form, role: e.target.value as Role })
+                      setForm({
+                        ...form,
+                        role: e.target.value as Role,
+                        verificationCode: "",
+                      })
                     }
                     className="w-full h-10 rounded-md border bg-background px-3 text-sm text-foreground"
                   >
@@ -215,7 +293,44 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
+              {isSignup && form.role !== "Citizen" && (
+                <div>
+                  <Label className="text-foreground">
+                    {form.role === "Admin"
+                      ? "Government Admin Verification Code"
+                      : "Official Staff ID / Verification Code"}
+                  </Label>
+
+                  <Input
+                    value={form.verificationCode}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        verificationCode: e.target.value,
+                      })
+                    }
+                    placeholder={
+                      form.role === "Admin"
+                        ? "Enter admin verification code"
+                        : "Enter staff ID or verification code"
+                    }
+                    autoComplete="off"
+                    required
+                  />
+
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {form.role === "Admin"
+                      ? "Enter the authorized administrator code."
+                      : "Enter the authorized staff credential."}
+                  </p>
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isSubmitting}
+              >
                 {isSubmitting
                   ? isSignup
                     ? "Creating Account..."
@@ -246,7 +361,10 @@ export default function LoginPage() {
                       }
                       className="text-xs bg-secondary hover:bg-secondary/80 rounded-lg px-3 py-2 text-left transition-colors text-foreground"
                     >
-                      <span className="font-medium">{s.label}</span> — {s.email}
+                      <span className="font-medium">
+                        {s.label}
+                      </span>{" "}
+                      — {s.email}
                     </button>
                   ))}
                 </div>
