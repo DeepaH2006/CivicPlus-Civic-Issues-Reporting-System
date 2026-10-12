@@ -1,3 +1,4 @@
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -10,6 +11,15 @@ dotenv.config();
 
 const app = express();
 
+// Verification codes for demo/testing.
+// In production, set these in your backend .env file.
+const ADMIN_VERIFICATION_CODE =
+  process.env.ADMIN_VERIFICATION_CODE || "CP-ADMIN-2026";
+
+const STAFF_VERIFICATION_CODE =
+  process.env.STAFF_VERIFICATION_CODE || "CP-STAFF-2026";
+
+// Allowed frontend origins
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:8080",
@@ -20,45 +30,142 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // allow requests from Postman / server-side tools / same-origin
+      // Allow Postman and server-to-server requests
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
-      } else {
-        return callback(new Error("Not allowed by CORS"));
       }
+
+      return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
   })
 );
 
-// Increase request payload limit
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ limit: "15mb", extended: true }));
 
 // Test route
 app.get("/", (req, res) => {
-  res.send("Server is running");
+  res.send("CivicPlus Server is running");
 });
 
-// Register API
+// ==================================================
+// REGISTER API — WITH SERVER-SIDE CODE VALIDATION
+// ==================================================
 app.post("/register", async (req, res) => {
   try {
-    const user = new User(req.body);
+    const {
+      name,
+      email,
+      password,
+      role,
+      verificationCode,
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, email, password, and role are required",
+      });
+    }
+
+    // Validate role
+    const allowedRoles = ["Citizen", "Admin", "Field Staff"];
+
+    if (!allowedRoles.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user role",
+      });
+    }
+
+    // Validate Government Admin verification code
+    if (
+      role === "Admin" &&
+      verificationCode !== ADMIN_VERIFICATION_CODE
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Invalid Government Admin Verification Code",
+      });
+    }
+
+    // Validate Field Staff verification code
+    if (
+      role === "Field Staff" &&
+      verificationCode !== STAFF_VERIFICATION_CODE
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Invalid Field Staff Verification Code",
+      });
+    }
+
+    // Check if email is already registered
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "Email is already registered",
+      });
+    }
+
+    // IMPORTANT:
+    // Save only user fields, never save the verification code.
+    const user = new User({
+      name: name.trim(),
+      email: normalizedEmail,
+      password,
+      role,
+    });
+
     await user.save();
-    res.send("User registered");
+
+    // Do not return the password to the client
+    const safeUser = user.toObject();
+    delete safeUser.password;
+
+    return res.status(201).json({
+      success: true,
+      message: "User registered successfully",
+      user: safeUser,
+    });
   } catch (err) {
-    res.status(400).send(err.message);
+    console.error("Registration error:", err);
+
+    if (err.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Email is already registered",
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: err.message || "Registration failed",
+    });
   }
 });
 
-// Login API
+// ==================================================
+// LOGIN API
+// ==================================================
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email, password });
+    const user = await User.findOne({
+      email: email?.trim().toLowerCase(),
+      password,
+    });
 
     if (!user) {
       return res.status(400).json({
@@ -67,20 +174,26 @@ app.post("/login", async (req, res) => {
       });
     }
 
-    res.json({
+    const safeUser = user.toObject();
+    delete safeUser.password;
+
+    return res.json({
       success: true,
-      user,
+      user: safeUser,
     });
   } catch (err) {
     console.error("Login error:", err);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: err.message,
     });
   }
 });
 
-// Submit complaint API
+// ==================================================
+// SUBMIT COMPLAINT API
+// ==================================================
 app.post("/complaint", async (req, res) => {
   try {
     console.log("Received complaint:", req.body);
@@ -115,61 +228,87 @@ app.post("/complaint", async (req, res) => {
       status: req.body.status || "Pending",
     });
 
-   await complaint.save();
+    await complaint.save();
 
-console.log("✅ COMPLAINT SAVED TO MONGODB:");
-console.log({
-  id: complaint._id,
-  userId: complaint.userId,
-  userName: complaint.userName,
-  userEmail: complaint.userEmail,
-  category: complaint.category,
-  department: complaint.department,
-  assignedStaff: complaint.assignedStaff,
-  status: complaint.status,
-});
+    console.log("COMPLAINT SAVED TO MONGODB:");
+    console.log({
+      id: complaint._id,
+      userId: complaint.userId,
+      userName: complaint.userName,
+      userEmail: complaint.userEmail,
+      category: complaint.category,
+      department: complaint.department,
+      assignedStaff: complaint.assignedStaff,
+      status: complaint.status,
+    });
 
-res.status(201).json({
-  success: true,
-  message: "Complaint submitted successfully",
-  complaint,
-});
+    return res.status(201).json({
+      success: true,
+      message: "Complaint submitted successfully",
+      complaint,
+    });
   } catch (err) {
     console.error("Complaint save error:", err);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: err.message,
     });
   }
 });
 
-// Get all complaints
+// ==================================================
+// GET ALL COMPLAINTS
+// ==================================================
 app.get("/complaints", async (req, res) => {
   try {
-    const complaints = await Complaint.find().sort({ createdAt: -1 });
-    res.json(complaints);
+    const complaints = await Complaint.find().sort({
+      createdAt: -1,
+    });
+
+    return res.json(complaints);
   } catch (err) {
     console.error("Fetch complaints error:", err);
-    res.status(500).json({ error: err.message });
+
+    return res.status(500).json({
+      error: err.message,
+    });
   }
 });
 
-// Update complaint status
+// ==================================================
+// UPDATE COMPLAINT STATUS
+// ==================================================
 app.patch("/complaints/:id/status", async (req, res) => {
   try {
     const complaint = await Complaint.findByIdAndUpdate(
       req.params.id,
       { status: req.body.status },
-      { new: true }
+      { new: true, runValidators: true }
     );
 
-    res.json({ success: true, complaint });
+    if (!complaint) {
+      return res.status(404).json({
+        success: false,
+        message: "Complaint not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      complaint,
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 });
 
-// Update complaint assignment or status
+// ==================================================
+// UPDATE COMPLAINT ASSIGNMENT OR STATUS
+// ==================================================
 app.patch("/complaints/:id", async (req, res) => {
   try {
     const updateData = {};
@@ -185,49 +324,106 @@ app.patch("/complaints/:id", async (req, res) => {
     const complaint = await Complaint.findByIdAndUpdate(
       req.params.id,
       updateData,
-      { new: true }
+      { new: true, runValidators: true }
     );
 
-    res.json({ success: true, complaint });
+    if (!complaint) {
+      return res.status(404).json({
+        success: false,
+        message: "Complaint not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      complaint,
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 });
 
-// Seed demo users
+// ==================================================
+// SEED DEMO USERS
+// ==================================================
 app.get("/seed", async (req, res) => {
   try {
     await User.deleteMany();
 
     await User.insertMany([
-      { name: "Admin", email: "admin@gmail.com", password: "admin123", role: "Admin" },
-      { name: "Citizen 1", email: "citizen@gmail.com", password: "123456", role: "Citizen" },
-      { name: "Citizen 2", email: "citizen2@gmail.com", password: "123456", role: "Citizen" },
-      { name: "Arun (Water)", email: "water@gmail.com", password: "123456", role: "Field Staff" },
-      { name: "Priya (Sanitation)", email: "garbage@gmail.com", password: "123456", role: "Field Staff" },
-      { name: "Kumar (Roads)", email: "road@gmail.com", password: "123456", role: "Field Staff" },
-      { name: "Lakshmi (Electrical)", email: "electrical@gmail.com", password: "123456", role: "Field Staff" }
+      {
+        name: "Admin",
+        email: "admin@gmail.com",
+        password: "admin123",
+        role: "Admin",
+      },
+      {
+        name: "Citizen 1",
+        email: "citizen@gmail.com",
+        password: "123456",
+        role: "Citizen",
+      },
+      {
+        name: "Citizen 2",
+        email: "citizen2@gmail.com",
+        password: "123456",
+        role: "Citizen",
+      },
+      {
+        name: "Arun (Water)",
+        email: "water@gmail.com",
+        password: "123456",
+        role: "Field Staff",
+      },
+      {
+        name: "Priya (Sanitation)",
+        email: "garbage@gmail.com",
+        password: "123456",
+        role: "Field Staff",
+      },
+      {
+        name: "Kumar (Roads)",
+        email: "road@gmail.com",
+        password: "123456",
+        role: "Field Staff",
+      },
+      {
+        name: "Lakshmi (Electrical)",
+        email: "electrical@gmail.com",
+        password: "123456",
+        role: "Field Staff",
+      },
     ]);
 
-    res.send("Demo users added");
+    return res.send("Demo users added");
   } catch (err) {
-    res.status(500).send(err.message);
+    return res.status(500).send(err.message);
   }
 });
 
-// Connect to MongoDB and start server
+// ==================================================
+// CONNECT TO MONGODB AND START SERVER
+// ==================================================
 async function startServer() {
   try {
+    if (!process.env.MONGO_URI) {
+      throw new Error("MONGO_URI is missing from backend environment");
+    }
+
     await mongoose.connect(process.env.MONGO_URI);
-    console.log("✅ Database Connected");
+
+    console.log("Database Connected");
 
     const PORT = process.env.PORT || 5000;
+
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`Server running on port ${PORT}`);
     });
   } catch (err) {
-    console.log("❌ Database connection error:");
-    console.log(err.message);
+    console.error("Server startup error:", err.message);
   }
 }
 
