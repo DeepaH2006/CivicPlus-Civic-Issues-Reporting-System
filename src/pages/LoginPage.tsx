@@ -1,4 +1,4 @@
-
+```tsx
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,6 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Shield, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+
+// Demo verification codes
+const ADMIN_DEMO_CODE = "CP-ADMIN-2026";
+const STAFF_DEMO_CODE = "CP-STAFF-2026";
 
 export default function LoginPage() {
   const { login, signup } = useAuth();
@@ -44,17 +48,27 @@ export default function LoginPage() {
       return;
     }
 
-    if (
-      isSignup &&
-      form.role !== "Citizen" &&
-      !form.verificationCode.trim()
-    ) {
-      toast.error(
-        form.role === "Admin"
-          ? "Please enter the Admin Verification Code"
-          : "Please enter the Staff Verification Code"
-      );
-      return;
+    // Verify Admin and Field Staff codes before signup.
+    if (isSignup && form.role === "Admin") {
+      if (
+        form.verificationCode.trim() !== ADMIN_DEMO_CODE
+      ) {
+        toast.error(
+          "Invalid Government Admin Verification Code"
+        );
+        return;
+      }
+    }
+
+    if (isSignup && form.role === "Field Staff") {
+      if (
+        form.verificationCode.trim() !== STAFF_DEMO_CODE
+      ) {
+        toast.error(
+          "Invalid Field Staff Verification Code"
+        );
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -203,7 +217,9 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               {isSignup && (
                 <div>
-                  <Label className="text-foreground">Name</Label>
+                  <Label className="text-foreground">
+                    Name
+                  </Label>
                   <Input
                     value={form.name}
                     onChange={(e) =>
@@ -219,7 +235,9 @@ export default function LoginPage() {
               )}
 
               <div>
-                <Label className="text-foreground">Email</Label>
+                <Label className="text-foreground">
+                  Email
+                </Label>
                 <Input
                   type="email"
                   value={form.email}
@@ -235,7 +253,9 @@ export default function LoginPage() {
               </div>
 
               <div>
-                <Label className="text-foreground">Password</Label>
+                <Label className="text-foreground">
+                  Password
+                </Label>
                 <div className="relative">
                   <Input
                     type={showPassword ? "text" : "password"}
@@ -273,7 +293,9 @@ export default function LoginPage() {
 
               {isSignup && (
                 <div>
-                  <Label className="text-foreground">Role</Label>
+                  <Label className="text-foreground">
+                    Role
+                  </Label>
 
                   <select
                     value={form.role}
@@ -288,7 +310,9 @@ export default function LoginPage() {
                   >
                     <option value="Citizen">Citizen</option>
                     <option value="Admin">Admin</option>
-                    <option value="Field Staff">Field Staff</option>
+                    <option value="Field Staff">
+                      Field Staff
+                    </option>
                   </select>
                 </div>
               )}
@@ -312,7 +336,7 @@ export default function LoginPage() {
                     placeholder={
                       form.role === "Admin"
                         ? "Enter admin verification code"
-                        : "Enter staff ID or verification code"
+                        : "Enter staff verification code"
                     }
                     autoComplete="off"
                     required
@@ -376,3 +400,4 @@ export default function LoginPage() {
     </div>
   );
 }
+```
