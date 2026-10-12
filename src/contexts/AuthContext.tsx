@@ -29,6 +29,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// Demo verification codes
+const ADMIN_DEMO_CODE = "CP-ADMIN-2026";
+const STAFF_DEMO_CODE = "CP-STAFF-2026";
+
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
@@ -52,8 +56,12 @@ export function AuthProvider({
     }
   }, []);
 
+  // LOGIN
   const login = useCallback(
-    async (email: string, password: string): Promise<AuthResult> => {
+    async (
+      email: string,
+      password: string
+    ): Promise<AuthResult> => {
       try {
         const response = await fetch(`${API_BASE}/login`, {
           method: "POST",
@@ -63,12 +71,15 @@ export function AuthProvider({
           body: JSON.stringify({ email, password }),
         });
 
-        const data = await response.json();
+        const contentType = response.headers.get("content-type");
+        const data = contentType?.includes("application/json")
+          ? await response.json()
+          : { message: await response.text() };
 
         if (!response.ok) {
           return {
             success: false,
-            error: data.message || "Invalid email or password",
+            error: data?.message || "Invalid email or password",
           };
         }
 
@@ -80,6 +91,7 @@ export function AuthProvider({
         };
 
         setUser(normalizedUser);
+
         localStorage.setItem(
           "civic_user",
           JSON.stringify(normalizedUser)
@@ -88,6 +100,7 @@ export function AuthProvider({
         return { success: true };
       } catch (error) {
         console.error("Login error:", error);
+
         return {
           success: false,
           error: "Server not reachable",
@@ -97,6 +110,7 @@ export function AuthProvider({
     []
   );
 
+  // SIGNUP
   const signup = useCallback(
     async (
       name: string,
@@ -105,6 +119,24 @@ export function AuthProvider({
       role: Role,
       verificationCode?: string
     ): Promise<AuthResult> => {
+      const code = verificationCode?.trim();
+
+      // Validate Admin verification code before API request
+      if (role === "Admin" && code !== ADMIN_DEMO_CODE) {
+        return {
+          success: false,
+          error: "Invalid Government Admin Verification Code",
+        };
+      }
+
+      // Validate Field Staff verification code before API request
+      if (role === "Field Staff" && code !== STAFF_DEMO_CODE) {
+        return {
+          success: false,
+          error: "Invalid Field Staff Verification Code",
+        };
+      }
+
       try {
         const response = await fetch(`${API_BASE}/register`, {
           method: "POST",
@@ -116,7 +148,7 @@ export function AuthProvider({
             email,
             password,
             role,
-            verificationCode,
+            verificationCode: code,
           }),
         });
 
@@ -134,7 +166,6 @@ export function AuthProvider({
 
         const registeredUser = data?.user || data;
 
-        // Never save the password in localStorage.
         const newUser = {
           ...registeredUser,
           id:
@@ -147,6 +178,7 @@ export function AuthProvider({
         } as User;
 
         setUser(newUser);
+
         localStorage.setItem(
           "civic_user",
           JSON.stringify(newUser)
@@ -155,6 +187,7 @@ export function AuthProvider({
         return { success: true };
       } catch (error) {
         console.error("Signup error:", error);
+
         return {
           success: false,
           error: "Server not reachable",
@@ -164,6 +197,7 @@ export function AuthProvider({
     []
   );
 
+  // LOGOUT
   const logout = useCallback(() => {
     setUser(null);
     localStorage.removeItem("civic_user");
