@@ -21,8 +21,6 @@ const statusColors: Record<string, string> = {
   Resolved: "#22c55e",
 };
 
-const GPS_ACCURACY_LIMIT = 100;
-
 interface SelectedLocation {
   address: string;
   latitude: number | null;
@@ -201,7 +199,6 @@ export default function MapView({
   const userMarkerRef = useRef<L.Marker | null>(null);
   const gpsWatchRef = useRef<number | null>(null);
   const gpsTimerRef = useRef<number | null>(null);
-  const bestPositionRef = useRef<GeolocationPosition | null>(null);
   const manualAddressRef = useRef("");
 
   const [locating, setLocating] = useState(false);
@@ -415,11 +412,10 @@ export default function MapView({
     selectedLocation,
   ]);
 
-  // Detect GPS location.
+  // Detect the device's best available location. The browser cannot guarantee
+  // perfect GPS accuracy; show the reported accuracy instead of rejecting a fix.
   function detectMyLocation() {
-    const map = mapRef.current;
-
-    if (!map) {
+    if (!mapRef.current) {
       setLocationMessage("Map is loading. Please try again.");
       return;
     }
@@ -433,113 +429,80 @@ export default function MapView({
 
     if (!window.isSecureContext) {
       setLocationMessage(
-        "GPS requires HTTPS. Enter your address manually or open the secure website."
+        "Location access requires HTTPS. Open the secure website or enter your address manually."
       );
       return;
     }
 
     stopGpsWatch();
-    bestPositionRef.current = null;
     setLocating(true);
     setGpsAccuracy(null);
-    setLocationMessage("Searching for an accurate GPS location...");
+    setLocationMessage("Getting your device location...");
 
-    let finished = false;
-
-    const finishWithBestReading = () => {
-      if (finished) return;
-
-      finished = true;
-      stopGpsWatch();
-      setLocating(false);
-
-      const best = bestPositionRef.current;
-
-      if (!best || best.coords.accuracy > GPS_ACCURACY_LIMIT) {
-        const accuracy = best
-          ? Math.round(best.coords.accuracy)
-          : null;
-
-        setLocationMessage(
-          accuracy !== null
-            ? `GPS accuracy is approximately ${accuracy} m. Enter your address manually or select a point on the map.`
-            : "Could not obtain your location. Enter your address manually or select a point on the map."
-        );
-        return;
-      }
-
-      const { latitude, longitude, accuracy } = best.coords;
-
-      setSelectedMarker(
-        latitude,
-        longitude,
-        `GPS location — accuracy approximately ${Math.round(accuracy)} m`
-      );
-
-      publishLocation({
-        address: "",
-        latitude,
-        longitude,
-        source: "gps",
-        accuracy,
-      });
-
-      setGpsAccuracy(accuracy);
-      setLocationMessage(
-        `GPS location selected. Accuracy: approximately ${Math.round(accuracy)} m.`
-      );
-    };
-
-    const watchId = navigator.geolocation.watchPosition(
+    navigator.geolocation.getCurrentPosition(
       (position) => {
-        if (finished) return;
+        const { latitude, longitude, accuracy } = position.coords;
 
         if (
-          !bestPositionRef.current ||
-          position.coords.accuracy <
-            bestPositionRef.current.coords.accuracy
+          !Number.isFinite(latitude) ||
+          !Number.isFinite(longitude) ||
+          latitude < -90 ||
+          latitude > 90 ||
+          longitude < -180 ||
+          longitude > 180
         ) {
-          bestPositionRef.current = position;
-          setGpsAccuracy(position.coords.accuracy);
+          setLocating(false);
+          setLocationMessage(
+            "Your device returned invalid coordinates. Try again or enter the address manually."
+          );
+          return;
         }
 
-        if (position.coords.accuracy <= GPS_ACCURACY_LIMIT) {
-          finishWithBestReading();
-        } else {
-          setLocationMessage(
-            `Best GPS accuracy so far: ${Math.round(
-              bestPositionRef.current.coords.accuracy
-            )} m. You can enter your address manually.`
-          );
-        }
+        setSelectedMarker(
+          latitude,
+          longitude,
+          `Your device location. Reported accuracy: approximately ${Math.round(accuracy)} m.`
+        );
+
+        publishLocation({
+          address: "",
+          latitude,
+          longitude,
+          source: "gps",
+          accuracy,
+        });
+
+        setGpsAccuracy(accuracy);
+        setLocating(false);
+        setLocationMessage(
+          accuracy <= 100
+            ? `Location selected. Reported accuracy: approximately ${Math.round(accuracy)} m.`
+            : `Location selected, but accuracy is approximately ${Math.round(accuracy)} m. For a more precise result, enable device location or select the exact point on the map.`
+        );
       },
       (error) => {
-        if (finished) return;
-
-        finished = true;
-        stopGpsWatch();
         setLocating(false);
 
-        setLocationMessage(
-          error.code === 1
-            ? "Location permission denied. Allow browser location access or enter the address manually."
-            : error.code === 3
-            ? "GPS request timed out. Try again or enter the address manually."
-            : "Location is unavailable. Enable device location or enter the address manually."
-        );
+        if (error.code === 1) {
+          setLocationMessage(
+            "Location permission denied. Allow location access for this website in your browser settings, then try again."
+          );
+        } else if (error.code === 2) {
+          setLocationMessage(
+            "Your device could not determine a location. Enable Windows/device location or enter the address manually."
+          );
+        } else {
+          setLocationMessage(
+            "The location request timed out. Try again near a window, check device location settings, or enter the address manually."
+          );
+        }
       },
       {
         enableHighAccuracy: true,
         maximumAge: 0,
-        timeout: 60000,
+        timeout: 30000,
       }
     );
-
-    gpsWatchRef.current = watchId;
-
-    gpsTimerRef.current = window.setTimeout(() => {
-      finishWithBestReading();
-    }, 60000);
   }
 
   // Search and select the typed address without submitting
